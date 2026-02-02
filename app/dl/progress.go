@@ -2,11 +2,14 @@ package dl
 
 import (
 	"context"
+	stdErrors "errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/fatih/color"
@@ -62,6 +65,10 @@ func (p *progress) OnDone(elem downloader.Elem, err error) {
 	}
 	t := tracker.(*pw.Tracker)
 
+	// Optional: ensure any buffered data is flushed to disk before closing/renaming.
+	// Ignore error here; Close() will surface issues too.
+	_ = e.to.Sync()
+
 	if err := e.to.Close(); err != nil {
 		p.fail(t, elem, errors.Wrap(err, "close file"))
 		return
@@ -98,7 +105,10 @@ func (p *progress) donePost(elem *iterElem) error {
 	}
 
 	newpath := filepath.Join(filepath.Dir(elem.to.Name()), newfile)
-	if err := os.Rename(elem.to.Name(), newpath); err != nil {
+
+	// Windows can temporarily lock files (Defender/AV/Indexer/Explorer preview).
+	// Retry rename to avoid failing the download at the final step.
+	if err := renameWithRetry(elem.to.Name(), newpath); err != nil {
 		return errors.Wrap(err, "rename file")
 	}
 
@@ -129,4 +139,55 @@ func (p *progress) elemString(elem downloader.Elem) string {
 		e.from.ID(),
 		e.fromMsg.ID,
 		strings.TrimSuffix(e.to.Name(), tempExt))
+}
+
+func renameWithRetry(oldpath, newpath string) error {
+	const (
+		attempts = 60
+		delay    = 150 * time.Millisecond
+	)
+
+	var err error
+	for i := 0; i < attempts; i++ {
+		err = os.Rename(oldpath, newpath)
+		if err == nil {
+			return nil
+		}
+
+		// Only retry transient Windows locking errors.
+		if runtime.GOOS != "windows" || !isWindowsFileLockError(err) {
+			return err
+		}
+
+		time.Sleep(delay)
+	}
+	return err
+}
+
+func isWindowsFileLockError(err error) bool {
+	// Numeric errno values so this compiles cross-platform.
+	// 5  = Access is denied
+	// 32 = Sharing violation
+	// 33 = Lock violation
+	const (
+		winAccessDenied     syscall.Errno = 5
+		winSharingViolation syscall.Errno = 32
+		winLockViolation    syscall.Errno = 33
+	)
+
+	for err != nil {
+		if pe, ok := err.(*os.PathError); ok {
+			err = pe.Err
+			continue
+		}
+
+		if errno, ok := err.(syscall.Errno); ok {
+			return errno == winAccessDenied ||
+				errno == winSharingViolation ||
+				errno == winLockViolation
+		}
+
+		err = stdErrors.Unwrap(err)
+	}
+	return false
 }
