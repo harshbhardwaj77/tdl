@@ -143,8 +143,17 @@ func (p *progress) elemString(elem downloader.Elem) string {
 
 func renameWithRetry(oldpath, newpath string) error {
 	const (
-		attempts = 60
-		delay    = 150 * time.Millisecond
+		// On some Windows machines (heavy AV/Defender, slow disks, etc.),
+		// the temp file or destination can stay locked for quite a while
+		// after we close our own handle. A small retry window (~9s) is
+		// often not enough for large media files, which leads to
+		// "post file: rename file" errors and forces a re-download.
+		//
+		// We therefore allow a much longer retry window here on Windows
+		// (attempts * delay), while still bailing out quickly on other
+		// platforms or non-lock related errors.
+		attempts = 2000
+		delay    = 100 * time.Millisecond
 	)
 
 	var err error
