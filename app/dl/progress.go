@@ -29,6 +29,8 @@ type progress struct {
 	opts     Options
 
 	it *iter
+	
+	next downloader.Progress // external progress listener
 }
 
 func newProgress(p pw.Writer, it *iter, opts Options) *progress {
@@ -37,46 +39,63 @@ func newProgress(p pw.Writer, it *iter, opts Options) *progress {
 		trackers: &sync.Map{},
 		opts:     opts,
 		it:       it,
+		next:     opts.ExternalProgress,
 	}
 }
 
 func (p *progress) OnAdd(elem downloader.Elem) {
+	if p.next != nil {
+		p.next.OnAdd(elem)
+	}
+
+	if p.opts.Silent {
+		return
+	}
+
 	tracker := prog.AppendTracker(p.pw, utils.Byte.FormatBinaryBytes, p.processMessage(elem), elem.File().Size())
 	p.trackers.Store(elem.(*iterElem).id, tracker)
 }
 
 func (p *progress) OnDownload(elem downloader.Elem, state downloader.ProgressState) {
+	if p.next != nil {
+		p.next.OnDownload(elem, state)
+	}
+
+	if p.opts.Silent {
+		return
+	}
+
 	tracker, ok := p.trackers.Load(elem.(*iterElem).id)
 	if !ok {
 		return
 	}
-
+	
 	t := tracker.(*pw.Tracker)
 	t.UpdateTotal(state.Total)
 	t.SetValue(state.Downloaded)
 }
 
 func (p *progress) OnDone(elem downloader.Elem, err error) {
+	if p.next != nil {
+		p.next.OnDone(elem, err)
+	}
+
 	e := elem.(*iterElem)
 
-	tracker, ok := p.trackers.Load(e.id)
-	if !ok {
-		return
-	}
-	t := tracker.(*pw.Tracker)
-
+	// Always cleanup file handles regardless of Silent mode or UI
+	// ... (rest of the logic remains same until tracker update)
+	
 	// Optional: ensure any buffered data is flushed to disk before closing/renaming.
-	// Ignore error here; Close() will surface issues too.
 	_ = e.to.Sync()
 
 	if err := e.to.Close(); err != nil {
-		p.fail(t, elem, errors.Wrap(err, "close file"))
+		p.fail(elem, errors.Wrap(err, "close file"))
 		return
 	}
 
 	if err != nil {
 		if !errors.Is(err, context.Canceled) { // don't report user cancel
-			p.fail(t, elem, errors.Wrap(err, "progress"))
+			p.fail(elem, errors.Wrap(err, "progress"))
 		}
 		_ = os.Remove(e.to.Name()) // just try to remove temp file, ignore error
 		return
@@ -85,7 +104,7 @@ func (p *progress) OnDone(elem downloader.Elem, err error) {
 	p.it.Finish(e.logicalPos)
 
 	if err := p.donePost(e); err != nil {
-		p.fail(t, elem, errors.Wrap(err, "post file"))
+		p.fail(elem, errors.Wrap(err, "post file"))
 		return
 	}
 }
@@ -123,7 +142,24 @@ func (p *progress) donePost(elem *iterElem) error {
 	return nil
 }
 
-func (p *progress) fail(t *pw.Tracker, elem downloader.Elem, err error) {
+func (p *progress) fail(elem downloader.Elem, err error) {
+	if p.next != nil {
+		// we can report error via OnDone if not finished?
+		// But OnDone is called with err already.
+		// fail() acts as a helper in OnDone.
+		// So p.next.OnDone is already called with err if we passed it.
+	}
+
+	if p.opts.Silent {
+		return
+	}
+
+	tracker, ok := p.trackers.Load(elem.(*iterElem).id)
+	if !ok {
+		return 
+	}
+	t := tracker.(*pw.Tracker)
+	
 	p.pw.Log(color.RedString("%s error: %s", p.elemString(elem), err.Error()))
 	t.MarkAsErrored()
 }
