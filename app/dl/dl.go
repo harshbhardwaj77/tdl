@@ -86,7 +86,7 @@ func Run(ctx context.Context, c *telegram.Client, kvd storage.Storage, opts Opti
 
 	if !opts.Restart {
 		// resume download and ask user to continue
-		if err = resume(ctx, kvd, it, !opts.Continue); err != nil {
+		if err = resume(ctx, kvd, it, !opts.Continue, opts.Silent); err != nil {
 			return err
 		}
 	} else {
@@ -163,7 +163,7 @@ func collectDialogs(parsers []parser) ([][]*tmessage.Dialog, error) {
 	return dialogs, nil
 }
 
-func resume(ctx context.Context, kvd storage.Storage, iter *iter, ask bool) error {
+func resume(ctx context.Context, kvd storage.Storage, iter *iter, ask bool, silent bool) error {
 	logctx.From(ctx).Debug("Check resume key",
 		zap.String("fingerprint", iter.Fingerprint()))
 
@@ -187,14 +187,16 @@ func resume(ctx context.Context, kvd storage.Storage, iter *iter, ask bool) erro
 
 	confirm := false
 	resumeStr := fmt.Sprintf("Found unfinished download, continue from '%d/%d'", len(finished), iter.Total())
-	if ask {
+	if ask && !silent {
 		if err = survey.AskOne(&survey.Confirm{
 			Message: color.YellowString(resumeStr + "?"),
 		}, &confirm); err != nil {
 			return err
 		}
 	} else {
-		color.Yellow(resumeStr)
+		if !silent {
+			color.Yellow(resumeStr)
+		}
 		confirm = true
 	}
 

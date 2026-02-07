@@ -79,6 +79,18 @@ func New() *cobra.Command {
 			cmd.SetContext(logctx.With(cmd.Context(),
 				logutil.New(level, filepath.Join(consts.LogPath, "latest.log"))))
 
+			// Load config file
+			viper.SetConfigName("tdl")
+			viper.SetConfigType("toml")
+			viper.AddConfigPath(".")
+			viper.AddConfigPath(consts.DataDir) // app data dir
+			if err := viper.ReadInConfig(); err != nil {
+				if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+					// Config file was found but another error was produced
+					return errors.Wrap(err, "read config file")
+				}
+			}
+
 			ns := viper.GetString(consts.FlagNamespace)
 			if ns != "" {
 				logctx.From(cmd.Context()).Info("Namespace",

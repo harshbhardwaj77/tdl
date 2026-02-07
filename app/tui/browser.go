@@ -1,0 +1,271 @@
+package tui
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/gotd/td/tg"
+	
+	"github.com/iyear/tdl/pkg/tclient"
+)
+
+// Messages
+type dialogsMsg struct {
+	Dialogs []DialogItem
+	Err     error
+}
+
+type historyMsg struct {
+	Messages []MessageItem
+	Err      error
+}
+
+// Items for List
+type DialogItem struct {
+	Title    string
+	PeerID   int64
+	Peer     tg.InputPeerClass
+	Unread   int
+	LastDate int // timestamp
+}
+
+func (d DialogItem) FilterValue() string { return d.Title }
+func (d DialogItem) TitleString() string { return d.Title }
+func (d DialogItem) Description() string { 
+	return fmt.Sprintf("ID: %d | Unread: %d", d.PeerID, d.Unread) 
+}
+
+type MessageItem struct {
+	ID       int
+	ChatID   int64
+	Peer     tg.InputPeerClass
+	Text     string
+	Date     int
+	HasMedia bool
+	Media    string
+	File     *tg.InputFileLocation
+	From     string
+}
+
+func (m MessageItem) FilterValue() string { return m.Text }
+func (m MessageItem) TitleString() string { 
+	if m.HasMedia {
+		return fmt.Sprintf("[%s] %s", m.Media, m.Text)
+	}
+	return m.Text 
+}
+func (m MessageItem) Description() string { 
+	t := time.Unix(int64(m.Date), 0)
+	return fmt.Sprintf("%s | ID: %d", t.Format("15:04 Jan 02"), m.ID)
+}
+
+// Commands
+func (m *Model) GetDialogs() tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		
+		// Create client (reusing logic from checkLogin or ideally persistent client)
+		// For now creating new client each time is inefficient but safest without refactoring everything
+		opts := tclient.Options{KV: m.storage}
+		client, err := tclient.New(ctx, opts, false)
+		if err != nil {
+			return dialogsMsg{Err: err}
+		}
+
+		var items []DialogItem
+		
+		err = client.Run(ctx, func(ctx context.Context) error {
+			// Get Dialogs
+			// We use raw API for full control or high level if available
+			// Get Dialogs
+			// We use raw API for full control or high level if available
+			// gotd has 'message' package helper
+			raw := tg.NewClient(client)
+			
+			// Simple get dialogs
+			// Limit 20 for now
+			// We need to fetch peers manually using raw.MessagesGetDialogs
+			// helper: sender.Resolve(name)
+			
+			// Using helper
+			// We need to implement proper dialog fetching.
+			// messages.getDialogs offset_date:int offset_id:int offset_peer:InputPeer limit:int hash:long = messages.Dialogs;
+			
+			dlgRes, err := raw.MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
+				Limit: 20,
+			})
+			if err != nil {
+				return err
+			}
+			
+			// Process response
+			// It can be MessagesDialogsSlice or MessagesDialogs
+			var (
+				dialogs []tg.DialogClass
+				chats   []tg.ChatClass
+				users   []tg.UserClass
+			)
+			
+			switch d := dlgRes.(type) {
+			case *tg.MessagesDialogs:
+				dialogs = d.Dialogs
+				chats = d.Chats
+				users = d.Users
+			case *tg.MessagesDialogsSlice:
+				dialogs = d.Dialogs
+				chats = d.Chats
+				users = d.Users
+			}
+			
+			// Map peers
+			peerMap := make(map[int64]string)
+			for _, u := range users {
+				user := u.(*tg.User)
+				peerMap[user.ID] = user.FirstName + " " + user.LastName
+			}
+			for _, c := range chats {
+				switch chat := c.(type) {
+				case *tg.Chat:
+					peerMap[chat.ID] = chat.Title
+				case *tg.Channel:
+					peerMap[chat.ID] = chat.Title
+				}
+			}
+			
+			for _, d := range dialogs {
+				dlg, ok := d.(*tg.Dialog)
+				if !ok {
+					continue
+				}
+				
+				var peerID int64
+				var title string
+				var inputPeer tg.InputPeerClass
+				
+				switch p := dlg.Peer.(type) {
+				case *tg.PeerUser:
+					peerID = p.UserID
+					title = peerMap[peerID]
+					inputPeer = &tg.InputPeerUser{UserID: peerID} // AccessHash missing? We need full peer
+				case *tg.PeerChat:
+					peerID = p.ChatID
+					title = peerMap[peerID]
+					inputPeer = &tg.InputPeerChat{ChatID: peerID}
+				case *tg.PeerChannel:
+					peerID = p.ChannelID
+					title = peerMap[peerID]
+					// We need access hash properly effectively...
+					// This simple mapping is risky. 
+					// TDL has 'peers' package or similar?
+				}
+				
+				if title == "" {
+					title = "Unknown Chat"
+				}
+
+				items = append(items, DialogItem{
+					Title:    title,
+					PeerID:   peerID,
+					Unread:   dlg.UnreadCount,
+					Peer:     inputPeer,
+				})
+			}
+			
+			return nil
+		})
+		
+		if err != nil {
+			return dialogsMsg{Err: err}
+		}
+		
+		return dialogsMsg{Dialogs: items}
+	}
+}
+
+func (m *Model) GetHistory(peer tg.InputPeerClass) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		opts := tclient.Options{KV: m.storage}
+		client, err := tclient.New(ctx, opts, false)
+		if err != nil {
+			return historyMsg{Err: err}
+		}
+
+		var items []MessageItem
+		
+		err = client.Run(ctx, func(ctx context.Context) error {
+			raw := tg.NewClient(client)
+			
+			// Get History
+			histRes, err := raw.MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
+				Peer: peer,
+				Limit: 50,
+			})
+			if err != nil {
+				return err
+			}
+			
+			// Resolve PeerID for link construction
+			var peerID int64
+			switch p := peer.(type) {
+			case *tg.InputPeerChannel:
+				peerID = p.ChannelID
+			case *tg.InputPeerChat:
+				peerID = p.ChatID
+			case *tg.InputPeerUser:
+				peerID = p.UserID
+			}
+			
+			var messages []tg.MessageClass
+			switch h := histRes.(type) {
+			case *tg.MessagesMessages:
+				messages = h.Messages
+			case *tg.MessagesMessagesSlice:
+				messages = h.Messages
+			case *tg.MessagesChannelMessages:
+				messages = h.Messages
+			}
+			
+			for _, msg := range messages {
+				switch m := msg.(type) {
+				case *tg.Message:
+					text := m.Message
+					hasMedia := false
+					mediaType := ""
+					
+					// Basic media check
+					if m.Media != nil {
+						hasMedia = true
+						switch m.Media.(type) {
+						case *tg.MessageMediaPhoto:
+							mediaType = "Photo"
+						case *tg.MessageMediaDocument:
+							mediaType = "Document"
+						default:
+							mediaType = "Media"
+						}
+					}
+					
+					items = append(items, MessageItem{
+						ID:       m.ID,
+						ChatID:   peerID,
+						Peer:     peer,
+						Text:     text,
+						Date:     m.Date,
+						HasMedia: hasMedia,
+						Media:    mediaType,
+					})
+				}
+			}
+			return nil
+		})
+		
+		if err != nil {
+			return historyMsg{Err: err}
+		}
+		
+		return historyMsg{Messages: items}
+	}
+}

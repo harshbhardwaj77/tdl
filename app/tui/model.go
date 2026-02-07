@@ -2,17 +2,19 @@ package tui
 
 import (
 	"context"
+	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/filepicker"
 	"github.com/gotd/td/tg"
+	"github.com/iyear/tdl/pkg/tclient"
 	
 	"github.com/iyear/tdl/core/storage"
 	"github.com/iyear/tdl/pkg/consts"
-	"github.com/iyear/tdl/pkg/tclient"
 )
 
 type sessionState int
@@ -20,11 +22,26 @@ type sessionState int
 const (
 	stateDashboard sessionState = iota
 	stateDownloads
+	stateConfig
+	stateBrowser
+	stateBatch
 	stateLogin
 )
 
 type Model struct {
 	state      sessionState
+	ActiveTab  int // 0: Dashboard, 1: Browser, 2: Downloads
+	
+	// Browser State
+	Dialogs    list.Model
+	Messages   list.Model
+	Browsing   bool // True if focused heavily on browser
+	Pane       int // 0: Dialogs (Left), 1: Messages (Right)
+	SelectedApp *tclient.App
+	LoadingDialogs bool
+	LoadingHistory bool
+	LoadingExport  bool
+	
 	width      int
 	height     int
 	quitting   bool
@@ -35,12 +52,20 @@ type Model struct {
 	viewport   viewport.Model
 	input      textinput.Model
 	
+	// Config Editor
+	ConfigInputs     []textinput.Model
+	ConfigFocusIndex int
+	
+	// Batch Processing
+	FilePicker filepicker.Model
+	
 	// Data
 	Namespace  string
 	Connected  bool
 	BuildInfo  string
 	User       *tg.User
 	Downloads  map[string]*DownloadItem
+	StatusMessage string
 	
 	// Internal
 	storage    storage.Storage
@@ -49,6 +74,11 @@ type Model struct {
 
 type loginMsg struct {
 	User *tg.User
+	Err  error
+}
+
+type ExportMsg struct {
+	Path string
 	Err  error
 }
 
@@ -61,14 +91,33 @@ func NewModel(s storage.Storage) *Model {
 	ti.CharLimit = 156
 	ti.Width = 40
 
+	// Initialize Browser Lists
+	dList := list.New([]list.Item{}, ItemDelegate{}, 0, 0)
+	dList.Title = "Chats"
+	dList.SetShowHelp(false)
+	
+	mList := list.New([]list.Item{}, ItemDelegate{}, 0, 0)
+	mList.Title = "Messages"
+	mList.SetShowHelp(false)
+
+	// File Picker
+	fp := filepicker.New()
+	fp.AllowedTypes = []string{".json"}
+	fp.CurrentDirectory, _ = os.Getwd()
+
 	return &Model{
 		state:     stateDashboard,
+		ActiveTab: 0, // Dashboard default
+		Dialogs:   dList,
+		Messages:  mList,
+		Pane:      0, // Start with Dialogs focused
 		spinner:   sp,
 		Namespace: consts.DefaultNamespace,
 		BuildInfo: consts.Version,
 		storage:   s,
 		Downloads: make(map[string]*DownloadItem),
 		input:     ti,
+		FilePicker: fp,
 	}
 }
 
