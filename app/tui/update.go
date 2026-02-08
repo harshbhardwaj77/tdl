@@ -177,7 +177,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Messages.SetItems(nil)
 			
 			// Re-login
-			return m, m.checkLogin
+			return m, m.startClient
 		}
 
 	case tea.KeyMsg:

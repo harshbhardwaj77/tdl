@@ -77,133 +77,111 @@ func logToFile(msg string) {
 func (m *Model) GetDialogs() tea.Cmd {
 	return func() tea.Msg {
 		logToFile("GetDialogs: Starting")
+		if m.Client == nil {
+			logToFile("GetDialogs: Client is nil")
+			return dialogsMsg{Err: fmt.Errorf("client not connected")}
+		}
+		
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		
-		// Create client (reusing logic from checkLogin or ideally persistent client)
-		// For now creating new client each time is inefficient but safest without refactoring everything
-		opts := tclient.Options{KV: m.storage}
-		client, err := tclient.New(ctx, opts, false)
+		// Use persistent client
+		raw := tg.NewClient(m.Client)
+		
+		logToFile("GetDialogs: Fetching API")
+		dlgRes, err := raw.MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
+			Limit: 20,
+		})
 		if err != nil {
-			logToFile("GetDialogs: Client Init Error: " + err.Error())
+			logToFile("GetDialogs: API Error: " + err.Error())
 			return dialogsMsg{Err: err}
 		}
+		logToFile(fmt.Sprintf("GetDialogs: API Success, Type: %T", dlgRes))
+		
+		// Process response
+		var (
+			dialogs []tg.DialogClass
+			chats   []tg.ChatClass
+			users   []tg.UserClass
+		)
+		
+		switch d := dlgRes.(type) {
+		case *tg.MessagesDialogs:
+			dialogs = d.Dialogs
+			chats = d.Chats
+			users = d.Users
+		case *tg.MessagesDialogsSlice:
+			dialogs = d.Dialogs
+			chats = d.Chats
+			users = d.Users
+		}
+		
+		logToFile(fmt.Sprintf("GetDialogs: Found %d dialogs", len(dialogs)))
 
+		// Map peers
+		peerMap := make(map[int64]string)
+		for _, u := range users {
+			user := u.(*tg.User)
+			peerMap[user.ID] = user.FirstName + " " + user.LastName
+		}
+		for _, c := range chats {
+			switch chat := c.(type) {
+			case *tg.Chat:
+				peerMap[chat.ID] = chat.Title
+			case *tg.Channel:
+				peerMap[chat.ID] = chat.Title
+			}
+		}
+		
 		var items []DialogItem
-		
-		err = client.Run(ctx, func(ctx context.Context) error {
-			logToFile("GetDialogs: Client Running")
-			// Get Dialogs
-			// We use raw API for full control or high level if available
-			// gotd has 'message' package helper
-			raw := tg.NewClient(client)
+		for _, d := range dialogs {
+			dlg, ok := d.(*tg.Dialog)
+			if !ok {
+				continue
+			}
 			
-			logToFile("GetDialogs: Fetching API")
-			dlgRes, err := raw.MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
-				Limit: 20,
+			var peerID int64
+			var title string
+			var inputPeer tg.InputPeerClass
+			
+			switch p := dlg.Peer.(type) {
+			case *tg.PeerUser:
+				peerID = p.UserID
+				title = peerMap[peerID]
+				inputPeer = &tg.InputPeerUser{UserID: peerID}
+				for _, u := range users {
+					if user, ok := u.(*tg.User); ok && user.ID == peerID {
+						inputPeer = &tg.InputPeerUser{UserID: peerID, AccessHash: user.AccessHash}
+						break
+					}
+				}
+			case *tg.PeerChat:
+				peerID = p.ChatID
+				title = peerMap[peerID]
+				inputPeer = &tg.InputPeerChat{ChatID: peerID}
+			case *tg.PeerChannel:
+				peerID = p.ChannelID
+				title = peerMap[peerID]
+				for _, c := range chats {
+					if ch, ok := c.(*tg.Channel); ok && ch.ID == peerID {
+						inputPeer = &tg.InputPeerChannel{ChannelID: peerID, AccessHash: ch.AccessHash}
+						if title == "" { title = ch.Title }
+						break
+					}
+				}
+				if inputPeer == nil { inputPeer = &tg.InputPeerChannel{ChannelID: peerID} }
+			}
+			
+			if title == "" {
+				title = fmt.Sprintf("Unknown Chat %d", peerID)
+			}
+
+			items = append(items, DialogItem{
+				Title:    title,
+				PeerID:   peerID,
+				Unread:   dlg.UnreadCount,
+				Peer:     inputPeer,
 			})
-			if err != nil {
-				logToFile("GetDialogs: API Error: " + err.Error())
-				return err
-			}
-			logToFile(fmt.Sprintf("GetDialogs: API Success, Type: %T", dlgRes))
-			
-			// Process response
-			// It can be MessagesDialogsSlice or MessagesDialogs
-			var (
-				dialogs []tg.DialogClass
-				chats   []tg.ChatClass
-				users   []tg.UserClass
-			)
-			
-			switch d := dlgRes.(type) {
-			case *tg.MessagesDialogs:
-				dialogs = d.Dialogs
-				chats = d.Chats
-				users = d.Users
-			case *tg.MessagesDialogsSlice:
-				dialogs = d.Dialogs
-				chats = d.Chats
-				users = d.Users
-			}
-			
-			logToFile(fmt.Sprintf("GetDialogs: Found %d dialogs", len(dialogs)))
-
-			// Map peers
-			peerMap := make(map[int64]string)
-			for _, u := range users {
-				user := u.(*tg.User)
-				peerMap[user.ID] = user.FirstName + " " + user.LastName
-			}
-			for _, c := range chats {
-				switch chat := c.(type) {
-				case *tg.Chat:
-					peerMap[chat.ID] = chat.Title
-				case *tg.Channel:
-					peerMap[chat.ID] = chat.Title
-				}
-			}
-			
-			for _, d := range dialogs {
-				dlg, ok := d.(*tg.Dialog)
-				if !ok {
-					continue
-				}
-				
-				var peerID int64
-				var title string
-				var inputPeer tg.InputPeerClass
-				
-				switch p := dlg.Peer.(type) {
-				case *tg.PeerUser:
-					peerID = p.UserID
-					title = peerMap[peerID]
-					inputPeer = &tg.InputPeerUser{UserID: peerID}
-					// Attempt to find access hash from users list
-					for _, u := range users {
-						if user, ok := u.(*tg.User); ok && user.ID == peerID {
-							inputPeer = &tg.InputPeerUser{UserID: peerID, AccessHash: user.AccessHash}
-							break
-						}
-					}
-				case *tg.PeerChat:
-					peerID = p.ChatID
-					title = peerMap[peerID]
-					inputPeer = &tg.InputPeerChat{ChatID: peerID}
-				case *tg.PeerChannel:
-					peerID = p.ChannelID
-					title = peerMap[peerID]
-					// Attempt to find access hash
-					for _, c := range chats {
-						// Need to check both Chat and Channel types in the Chats list
-						if ch, ok := c.(*tg.Channel); ok && ch.ID == peerID {
-							inputPeer = &tg.InputPeerChannel{ChannelID: peerID, AccessHash: ch.AccessHash}
-							// Also confirm title if missing
-							if title == "" { title = ch.Title }
-							break
-						}
-					}
-					if inputPeer == nil { inputPeer = &tg.InputPeerChannel{ChannelID: peerID} }
-				}
-				
-				if title == "" {
-					title = fmt.Sprintf("Unknown Chat %d", peerID)
-				}
-
-				items = append(items, DialogItem{
-					Title:    title,
-					PeerID:   peerID,
-					Unread:   dlg.UnreadCount,
-					Peer:     inputPeer,
-				})
-			}
-			
-			return nil
-		})
-		
-		if err != nil {
-			logToFile("GetDialogs: Run Error: " + err.Error())
-			return dialogsMsg{Err: err}
 		}
 		
 		logToFile(fmt.Sprintf("GetDialogs: Finished with %d items", len(items)))

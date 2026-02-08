@@ -2,7 +2,9 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/list"
@@ -11,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/filepicker"
+	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 	"github.com/iyear/tdl/pkg/tclient"
 	"github.com/iyear/tdl/pkg/kv"
@@ -90,6 +93,11 @@ type Model struct {
 	// Internal
 	storage    storage.Storage
 	tuiProgram *tea.Program
+	
+	// Persistent Client
+	Client     *telegram.Client
+	ClientCtx  context.Context
+	ClientCancel context.CancelFunc
 }
 
 type loginMsg struct {
@@ -180,50 +188,91 @@ func (m *Model) SetProgram(p *tea.Program) {
 }
 
 func (m *Model) Init() tea.Cmd {
+	// Initialize Status
+	m.StatusMessage = "Connecting to Telegram..."
+	
 	return tea.Batch(
 		m.spinner.Tick,
-		m.checkLogin,
-		m.GetAccounts(),
+		m.startClient, // Start the persistent connection
 	)
 }
 
-func (m *Model) checkLogin() tea.Msg {
-	// Create a background context for the client
-	// In a real app we might want to manage this context better
-	ctx := context.Background()
+func (m *Model) startClient() tea.Msg {
+	// Cleanup existing client if any
+	if m.ClientCancel != nil {
+		m.ClientCancel()
+	}
+
+	// Create context for the client lifecycle
+	m.ClientCtx, m.ClientCancel = context.WithCancel(context.Background())
 	
-	// We need to construct minimal options for tclient.New
-	// We don't have full access to viper flags here easily unless we pass them or use viper directly
-	// For now let's assume standard options. 
-	// To do this properly we should pass Options to NewModel.
-	// But let's try a simpler approach check: check if session exists in storage.
-	
-	// Actually, we can just try to create a client with existing session
-	// We need 'tclient.Options' which requires KV.
-	
+	// Create the client instance 
+	// We need tclient options
 	opts := tclient.Options{
 		KV: m.storage,
-		// We omit Proxy/NTP for this simple check or load from viper if needed
+		// Add other options from config/viper if needed
 	}
 	
-	client, err := tclient.New(ctx, opts, false) // false = no interactive login
+	var err error
+	m.Client, err = tclient.New(m.ClientCtx, opts, false)
 	if err != nil {
 		return loginMsg{Err: err}
 	}
 	
-	var user *tg.User
-	err = client.Run(ctx, func(ctx context.Context) error {
-		self, err := client.Self(ctx)
-		if err != nil {
-			return err
+	// Run the client in a goroutine
+	// We use a channel to signal when the client is ready/authorized effectively?
+	// Actually client.Run blocks. We need to run it and then perform a self check.
+	// But checkLogin expects a return based on 'User'. 
+	
+	// Strategy:
+	// 1. Start client.Run in goroutine.
+	// 2. Wait for it to be ready (Auth Status).
+	// 3. Fetch Self.
+	// 4. Return loginMsg.
+	
+	readyCh := make(chan struct{})
+	errCh := make(chan error)
+	
+	go func() {
+		err := m.Client.Run(m.ClientCtx, func(ctx context.Context) error {
+			// Signal ready
+			close(readyCh)
+			// Choose to block until context is done
+			<-ctx.Done()
+			return ctx.Err()
+		})
+		if err != nil && err != context.Canceled {
+			errCh <- err
 		}
-		user = self
-		return nil
-	})
+	}()
 	
-	if err != nil {
+	// Wait for ready or error
+	select {
+	case <-readyCh:
+		// Client is running. Now check auth.
+		// We need to use m.ClientCtx or a sub-context
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		
+		status, err := m.Client.Auth().Status(ctx)
+		if err != nil {
+			return loginMsg{Err: err}
+		}
+		
+		if !status.Authorized {
+			return loginMsg{Err: fmt.Errorf("not authorized")}
+		}
+		
+		// Fetch Self
+		self, err := m.Client.Self(ctx)
+		if err != nil {
+			return loginMsg{Err: err}
+		}
+		return loginMsg{User: self}
+		
+	case err := <-errCh:
 		return loginMsg{Err: err}
+	case <-time.After(15 * time.Second):
+		return loginMsg{Err: fmt.Errorf("connection timeout")}
 	}
-	
-	return loginMsg{User: user}
 }
