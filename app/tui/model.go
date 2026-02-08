@@ -33,6 +33,7 @@ const (
 	stateBatch
 	stateBatchConfirm
 	stateLogin
+	stateExportPrompt
 )
 
 type Model struct {
@@ -54,6 +55,10 @@ type Model struct {
 	// Forwarding
 	PickingDest    bool // If true, selecting a dialog = forward destination
 	ForwardSource  []string
+	
+	// Export
+	ExportInput    textinput.Model
+	ExportTarget   DialogItem
 	
 	// UI State
 	ShowHelp       bool
@@ -162,6 +167,12 @@ func NewModel(root kv.Storage, s storage.Storage, ns string) *Model {
 	fp.AllowedTypes = []string{".json"}
 	fp.CurrentDirectory, _ = os.Getwd()
 
+	// Export Input
+	ei := textinput.New()
+	ei.Placeholder = "Enter filename (e.g. data.json)"
+	ei.CharLimit = 50
+	ei.Width = 40
+
 	// Download List
 	dlList := list.New([]list.Item{}, ItemDelegate{}, 0, 0)
 	dlList.Title = "Downloads"
@@ -181,6 +192,7 @@ func NewModel(root kv.Storage, s storage.Storage, ns string) *Model {
 		Downloads: make(map[string]*DownloadItem),
 		DownloadList: dlList,
 		input:     ti,
+		ExportInput: ei,
 		FilePicker: fp,
 	}
 }

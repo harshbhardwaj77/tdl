@@ -65,6 +65,39 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	
+	// Export Prompt Intercept
+	if m.state == stateExportPrompt {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "enter":
+				filename := m.ExportInput.Value()
+				if filename == "" {
+					filename = fmt.Sprintf("%d.json", m.ExportTarget.PeerID)
+				}
+				// Ensure .json extension
+				if len(filename) < 5 || filename[len(filename)-5:] != ".json" {
+					filename += ".json"
+				}
+				
+				m.state = stateDashboard
+				m.ActiveTab = 1 // Return to browser
+				m.LoadingExport = true
+				m.StatusMessage = "Exporting to " + filename + "..."
+				return m, tea.Batch(m.startExport(m.ExportTarget, filename), m.spinner.Tick)
+				
+			case "esc":
+				m.state = stateDashboard
+				m.ActiveTab = 1
+				m.StatusMessage = "Export canceled"
+				return m, nil
+			}
+		}
+		var cmd tea.Cmd
+		m.ExportInput, cmd = m.ExportInput.Update(msg)
+		return m, cmd
+	}
 
 	switch msg := msg.(type) {
 	case loginMsg:
@@ -325,8 +358,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Handle Export
 				if msg.String() == "e" && !m.PickingDest {
 					if dlg, ok := m.Dialogs.SelectedItem().(DialogItem); ok {
-						m.LoadingExport = true
-						return m, tea.Batch(m.startExport(dlg), m.spinner.Tick)
+						m.state = stateExportPrompt
+						m.ExportTarget = dlg
+						m.ExportInput.Reset()
+						m.ExportInput.SetValue(fmt.Sprintf("%d.json", dlg.PeerID))
+						m.ExportInput.Focus()
+						return m, textinput.Blink
 					}
 				}
 				return m, cmd
@@ -458,10 +495,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.Width = msg.Width
 		m.viewport.Height = msg.Height
 		
+		// Calculate available space
+		// Borders: 2 (Left) + 2 (Right) = 4
+		// Margin: 1
+		// Total Overhead: 5
+		availableWidth := m.width - 5
+		if availableWidth < 0 { availableWidth = 0 }
+		
+		leftWidth := availableWidth / 3
+		rightWidth := availableWidth - leftWidth
+		
+		// Height Overhead: Header (~3) + Tabs (~3) + Footer (~3) = ~9
+		// Using -10 to be safe
+		listHeight := m.height - 10
+		if listHeight < 0 { listHeight = 0 }
+		
 		// Resize lists
-		m.Dialogs.SetSize(m.width/3, m.height-4)
-		m.Messages.SetSize((m.width/3)*2, m.height-4)
-		m.DownloadList.SetSize(m.width, m.height-4)
+		m.Dialogs.SetSize(leftWidth, listHeight)
+		m.Messages.SetSize(rightWidth, listHeight)
+		m.DownloadList.SetSize(m.width-2, listHeight) // Full width - border
 
 	}
 

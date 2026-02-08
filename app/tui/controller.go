@@ -114,13 +114,15 @@ func (m *Model) startBatchDownload(path string) tea.Cmd {
 	}
 }
 
-func (m *Model) startExport(d DialogItem) tea.Cmd {
+func (m *Model) startExport(d DialogItem, filename string) tea.Cmd {
 	storage := m.storage
 	return func() tea.Msg {
 		ctx := context.Background()
 		
-		// Use chat ID as filename: {ID}.json
-		filename := fmt.Sprintf("%d.json", d.PeerID)
+		// Use provided filename
+		if filename == "" {
+			filename = fmt.Sprintf("%d.json", d.PeerID)
+		}
 		
 		// Setup Options
 		opts := chat.ExportOptions{

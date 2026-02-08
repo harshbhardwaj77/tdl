@@ -40,6 +40,8 @@ func (m *Model) View() string {
 		s += m.viewBatchConfirm()
 	case stateDownloads:
 		s += m.viewDownloads()
+	case stateExportPrompt:
+		s += m.viewExportPrompt()
 	default:
 		// ActiveTab handling when on dashboard/browser
 		if m.ActiveTab == 1 {
@@ -97,15 +99,25 @@ func (m *Model) viewHelpModal(bg string) string {
 func (m *Model) viewBrowser() string {
 	var s string
 	
+	// Layout Calculations
+	availableWidth := m.width - 5
+	if availableWidth < 0 { availableWidth = 0 }
+	
+	leftWidth := availableWidth / 3
+	rightWidth := availableWidth - leftWidth
+	
+	listHeight := m.height - 10
+	if listHeight < 0 { listHeight = 0 }
+
 	// Left Pane (Dialogs)
 	leftStyle := InactivePaneStyle.Copy().
-		Width(m.width / 3).
-		Height(m.height - 4)
+		Width(leftWidth).
+		Height(listHeight)
 		
 	if m.PickingDest {
 		leftStyle = ActivePaneStyle.Copy().
-			Width(m.width / 3).
-			Height(m.height - 4).
+			Width(leftWidth).
+			Height(listHeight).
 			BorderForeground(lipgloss.Color("205")) // Pink for special mode
 	}
 	
@@ -121,14 +133,14 @@ func (m *Model) viewBrowser() string {
 	// Right Pane (Messages)
 	// ... (Right pane style logic same as before)
 	rightStyle := InactivePaneStyle.Copy().
-		Width((m.width / 3) * 2).
-		Height(m.height - 4).
+		Width(rightWidth).
+		Height(listHeight).
 		MarginLeft(1)
 
 	if m.Pane == 1 {
 		rightStyle = ActivePaneStyle.Copy().
-			Width((m.width / 3) * 2).
-			Height(m.height - 4).
+			Width(rightWidth).
+			Height(listHeight).
 			MarginLeft(1)
 	}
 	
@@ -319,4 +331,15 @@ func (m *Model) viewTabs() string {
 		tabs = append(tabs, style.Render(label))
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
+}
+
+func (m *Model) viewExportPrompt() string {
+	var s strings.Builder
+	s.WriteString(TitleStyle.Render("Export Chat Data"))
+	s.WriteString("\n\n")
+	s.WriteString("Enter filename for export (JSON):\n")
+	s.WriteString(m.ExportInput.View())
+	s.WriteString("\n\n")
+	s.WriteString(StatusBarStyle.Render("[Enter] Export • [Esc] Cancel"))
+	return s.String()
 }
