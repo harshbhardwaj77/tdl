@@ -7,11 +7,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/spf13/viper"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/filepicker"
 	"github.com/gotd/td/tg"
 	"github.com/iyear/tdl/pkg/tclient"
+	"github.com/iyear/tdl/pkg/kv"
 	
 	"github.com/iyear/tdl/core/storage"
 	"github.com/iyear/tdl/pkg/consts"
@@ -25,6 +27,7 @@ const (
 	stateConfig
 	stateBrowser
 	stateBatch
+	stateBatchConfirm
 	stateLogin
 )
 
@@ -41,6 +44,16 @@ type Model struct {
 	LoadingDialogs bool
 	LoadingHistory bool
 	LoadingExport  bool
+	Searching      bool // Global Search input mode
+	
+	// Forwarding
+	PickingDest    bool // If true, selecting a dialog = forward destination
+	ForwardSource  []string
+	
+	// UI State
+	ShowHelp       bool
+
+
 	
 	width      int
 	height     int
@@ -58,6 +71,7 @@ type Model struct {
 	
 	// Batch Processing
 	FilePicker filepicker.Model
+	BatchPath  string
 	
 	// Data
 	Namespace  string
@@ -65,7 +79,12 @@ type Model struct {
 	BuildInfo  string
 	User       *tg.User
 	Downloads  map[string]*DownloadItem
+	DownloadList list.Model // New list for downloads
 	StatusMessage string
+	
+	// Account Management
+	Accounts   []string
+	kvStorage  kv.Storage
 	
 	// Internal
 	storage    storage.Storage
@@ -82,7 +101,34 @@ type ExportMsg struct {
 	Err  error
 }
 
-func NewModel(s storage.Storage) *Model {
+type AccountsMsg struct {
+	Accounts []string
+	Err      error
+}
+
+type AccountSwitchedMsg struct {
+	Namespace string
+	Storage   storage.Storage
+	Err       error
+}
+
+func NewModel(root kv.Storage, s storage.Storage, ns string) *Model {
+	// Initialize Theme
+	p := viper.GetString("theme.primary")
+	sec := viper.GetString("theme.secondary")
+	errColor := viper.GetString("theme.error")
+	suc := viper.GetString("theme.success")
+	dim := viper.GetString("theme.dim")
+
+	// Fallback defaults if empty
+	if p == "" { p = "62" }
+	if sec == "" { sec = "230" }
+	if errColor == "" { errColor = "196" }
+	if suc == "" { suc = "42" }
+	if dim == "" { dim = "240" }
+
+	InitStyles(p, sec, errColor, suc, dim)
+
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	
@@ -105,6 +151,11 @@ func NewModel(s storage.Storage) *Model {
 	fp.AllowedTypes = []string{".json"}
 	fp.CurrentDirectory, _ = os.Getwd()
 
+	// Download List
+	dlList := list.New([]list.Item{}, ItemDelegate{}, 0, 0)
+	dlList.Title = "Downloads"
+	dlList.SetShowHelp(false)
+
 	return &Model{
 		state:     stateDashboard,
 		ActiveTab: 0, // Dashboard default
@@ -112,10 +163,12 @@ func NewModel(s storage.Storage) *Model {
 		Messages:  mList,
 		Pane:      0, // Start with Dialogs focused
 		spinner:   sp,
-		Namespace: consts.DefaultNamespace,
+		Namespace: ns,
 		BuildInfo: consts.Version,
 		storage:   s,
+		kvStorage: root,
 		Downloads: make(map[string]*DownloadItem),
+		DownloadList: dlList,
 		input:     ti,
 		FilePicker: fp,
 	}
@@ -129,6 +182,7 @@ func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
 		m.checkLogin,
+		m.GetAccounts(),
 	)
 }
 

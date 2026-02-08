@@ -24,6 +24,10 @@ func (m *Model) View() string {
 	
 	s += lipgloss.JoinHorizontal(lipgloss.Center, header, "  ", status)
 	s += "\n\n"
+	
+	// Tabs
+	s += m.viewTabs()
+	s += "\n\n"
 
 	// Main Content
 	// Handle different tabs
@@ -32,6 +36,8 @@ func (m *Model) View() string {
 		s += m.viewConfig()
 	case stateBatch:
 		s += m.viewBatch()
+	case stateBatchConfirm:
+		s += m.viewBatchConfirm()
 	case stateDownloads:
 		s += m.viewDownloads()
 	default:
@@ -44,8 +50,48 @@ func (m *Model) View() string {
 			s += m.viewDashboard()
 		}
 	}
+	
+	if m.ShowHelp {
+		return m.viewHelpModal(s)
+	}
 
 	return s
+}
+
+func (m *Model) viewHelpModal(bg string) string {
+	// Simple centered box
+	keys := []string{
+		"Navigation",
+		"  Tab       Switch Pane",
+		"  Arrows    Navigate List",
+		"  Enter     Select / Open",
+		"  Esc       Back / Blur",
+		"",
+		"Actions",
+		"  Space     Select Message",
+		"  /         Filter / Search",
+		"  f         Forward Selected",
+		"  e         Export Chat Info",
+		"  j         Batch Process (JSON)",
+		"  a         Switch Account",
+		"  l         Downloads Tab",
+		"",
+		"  ?         Close Help",
+		"  q         Quit",
+	}
+	
+	content := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorPrimary).
+		Padding(1, 2).
+		Render(strings.Join(keys, "\n"))
+		
+	return lipgloss.Place(m.width, m.height, 
+		lipgloss.Center, lipgloss.Center, 
+		content,
+		lipgloss.WithWhitespaceChars(" "),
+		lipgloss.WithWhitespaceForeground(lipgloss.Color("237")),
+	)
 }
 
 func (m *Model) viewBrowser() string {
@@ -56,10 +102,11 @@ func (m *Model) viewBrowser() string {
 		Width(m.width / 3).
 		Height(m.height - 4)
 		
-	if m.Pane == 0 {
+	if m.PickingDest {
 		leftStyle = ActivePaneStyle.Copy().
 			Width(m.width / 3).
-			Height(m.height - 4)
+			Height(m.height - 4).
+			BorderForeground(lipgloss.Color("205")) // Pink for special mode
 	}
 	
 	// Left Content
@@ -72,6 +119,7 @@ func (m *Model) viewBrowser() string {
 	left := leftStyle.Render(leftContent)
 	
 	// Right Pane (Messages)
+	// ... (Right pane style logic same as before)
 	rightStyle := InactivePaneStyle.Copy().
 		Width((m.width / 3) * 2).
 		Height(m.height - 4).
@@ -96,14 +144,34 @@ func (m *Model) viewBrowser() string {
 	right := rightStyle.Render(rightContent)
 	
 	s = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
-	s += StatusBarStyle.Render("\n  [Tab] Switch Pane • [Enter] Select • [e] Export Info (JSON) • [Esc] Back")
+	
+	if m.PickingDest {
+		s += StatusBarStyle.Render("\n  [Enter] Confirm Destination (Forward) • [Esc] Cancel")
+	} else {
+		s += StatusBarStyle.Render("\n  [Tab] Switch Pane • [Enter] Select • [Space] Select Msg • [e] Export • [f] Forward")
+	}
 	
 	if m.LoadingExport {
 		s += lipgloss.NewStyle().Foreground(ColorPrimary).Render("\n  ⏳ Exporting chat info... This may take a while.")
 	} else if m.StatusMessage != "" {
 		s += lipgloss.NewStyle().Foreground(ColorSuccess).Render("\n  " + m.StatusMessage)
+	} else if !m.PickingDest {
+		// Show selection count
+		count := 0
+		for _, item := range m.Messages.Items() {
+			if mItem, ok := item.(MessageItem); ok && mItem.Selected {
+				count++
+			}
+		}
+		if count > 0 {
+			s += lipgloss.NewStyle().Foreground(ColorPrimary).Render(fmt.Sprintf("\n  %d messages selected", count))
+		}
 	}
 	
+	if m.Searching || (m.ActiveTab == 1 && m.input.Focused()) {
+		s += "\n\n  " + m.input.View()
+	}
+
 	return s
 }
 
@@ -124,7 +192,21 @@ func (m *Model) viewDashboard() string {
 		s.WriteString("\n  Please login via 'tdl login' first or check your configuration.\n")
 	}
 	
-	s.WriteString("\n\n  [d] Dashboard  [b] Browser  [l] Downloads  [i] New Download  [q] Quit")
+	// Accounts Section
+	if len(m.Accounts) > 1 {
+		s.WriteString("\n\n" + TitleStyle.Render("Accounts [a]:"))
+		for _, acc := range m.Accounts {
+			style := lipgloss.NewStyle().Foreground(ColorSecondary)
+			prefix := "  "
+			if acc == m.Namespace {
+				style = lipgloss.NewStyle().Foreground(ColorSuccess).Bold(true)
+				prefix = "> "
+			}
+			s.WriteString("\n" + style.Render(fmt.Sprintf("%s%s", prefix, acc)))
+		}
+	}
+	
+	s.WriteString("\n\n  [d] Dashboard  [b] Browser  [l] Downloads  [c] Config  [j] Batch  [i] New Download  [q] Quit")
 	
 	if m.input.Focused() {
 		s.WriteString("\n\n")
@@ -133,6 +215,9 @@ func (m *Model) viewDashboard() string {
 	
 	// Footer
 	s.WriteString("\n\n")
+	if m.StatusMessage != "" {
+		s.WriteString(lipgloss.NewStyle().Foreground(ColorPrimary).Render("  " + m.StatusMessage + "\n"))
+	}
 	s.WriteString(StatusBarStyle.Render(fmt.Sprintf("tdl %s • %s", m.BuildInfo, m.Namespace)))
 	
 	return s.String()
@@ -194,4 +279,34 @@ func (m *Model) viewBatch() string {
 
 func (m *Model) helpView() string {
 	return StatusBarStyle.Render("\n  ctrl+c/q: quit • d: dashboard • l: download • b: browser • c: config • j: batch (json)\n")
+}
+
+func (m *Model) viewBatchConfirm() string {
+	var s strings.Builder
+	s.WriteString(TitleStyle.Render("Confirm Batch Action"))
+	s.WriteString("\n\n")
+	s.WriteString(fmt.Sprintf("Selected File: %s", m.BatchPath))
+	s.WriteString("\n\n")
+	s.WriteString("What would you like to do?\n\n")
+	s.WriteString(lipgloss.NewStyle().Foreground(ColorSuccess).Render("[d] Download (Default)"))
+	s.WriteString("\n")
+	s.WriteString(lipgloss.NewStyle().Foreground(ColorSecondary).Render("[f] Forward to Chat"))
+	s.WriteString("\n\n")
+	s.WriteString(StatusBarStyle.Render("[Esc] Cancel"))
+	return s.String()
+}
+
+func (m *Model) viewTabs() string {
+	var tabs []string
+	// Definition of tabs: 0=Dashboard, 1=Browser, 2=Downloads
+	labels := []string{"Dashboard", "Browser", "Downloads"}
+	
+	for i, label := range labels {
+		style := InactiveTabStyle
+		if m.ActiveTab == i {
+			style = ActiveTabStyle
+		}
+		tabs = append(tabs, style.Render(label))
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
 }

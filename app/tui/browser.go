@@ -47,14 +47,19 @@ type MessageItem struct {
 	Media    string
 	File     *tg.InputFileLocation
 	From     string
+	Selected bool
 }
 
 func (m MessageItem) FilterValue() string { return m.Text }
-func (m MessageItem) TitleString() string { 
-	if m.HasMedia {
-		return fmt.Sprintf("[%s] %s", m.Media, m.Text)
+func (m MessageItem) TitleString() string {
+	prefix := " "
+	if m.Selected {
+		prefix = "[x] "
 	}
-	return m.Text 
+	if m.HasMedia {
+		return fmt.Sprintf("%s[%s] %s", prefix, m.Media, m.Text)
+	}
+	return prefix + m.Text 
 }
 func (m MessageItem) Description() string { 
 	t := time.Unix(int64(m.Date), 0)

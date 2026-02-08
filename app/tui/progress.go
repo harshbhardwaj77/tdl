@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/iyear/tdl/core/downloader"
@@ -72,14 +73,50 @@ func (t *TUIProgress) OnDone(elem downloader.Elem, err error) {
 		IsFinished: true,
 		Err:        err,
 	})
+	
+	if err == nil {
+		// Send notification
+		// We run this in a goroutine to avoid blocking
+		go func() {
+			notify("Download Complete", fmt.Sprintf("%s has finished downloading.", name))
+		}()
+	}
 }
 
 // DownloadItem represents a single download in the list
 type DownloadItem struct {
 	Name       string
+	Path       string // Full absolute path
 	Total      int64
 	Downloaded int64
 	Progress   progress.Model
 	Finished   bool
 	Err        error
+}
+
+func (d *DownloadItem) Title() string {
+	return d.Name
+}
+
+func (d *DownloadItem) Description() string {
+	if d.Finished {
+		if d.Err != nil {
+			return "❌ Failed: " + d.Err.Error()
+		}
+		return "✅ Completed"
+	}
+	
+	prog := d.Progress.ViewAs(d.percent())
+	return fmt.Sprintf("%s", prog)
+}
+
+func (d *DownloadItem) FilterValue() string {
+	return d.Name
+}
+
+func (d *DownloadItem) percent() float64 {
+	if d.Total <= 0 {
+		return 0
+	}
+	return float64(d.Downloaded) / float64(d.Total)
 }

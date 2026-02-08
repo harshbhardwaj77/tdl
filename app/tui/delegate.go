@@ -73,5 +73,11 @@ func (d ItemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		}
 		
 		fmt.Fprint(w, fn(str))
+	case *DownloadItem:
+		str = fmt.Sprintf("%s  %s", item.Title(), item.Description())
+		if index == m.Index() {
+			str = "> " + str
+		}
+		fmt.Fprint(w, fn(str))
 	}
 }

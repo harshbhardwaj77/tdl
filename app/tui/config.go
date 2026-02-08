@@ -25,6 +25,12 @@ var configKeys = []string{
 	"skip_same",
 	"takeout",
 	"continue",
+	"theme.primary",
+	"theme.secondary",
+	"theme.error",
+	"theme.success",
+	"theme.dim",
+	"notify",
 }
 
 func (m *Model) InitConfigInputs() {
@@ -52,6 +58,20 @@ func (m *Model) SaveConfig() error {
 		val := input.Value()
 		viper.Set(key, val)
 	}
+	
+	// Apply Theme immediately
+	p := viper.GetString("theme.primary")
+	sec := viper.GetString("theme.secondary")
+	errColor := viper.GetString("theme.error")
+	suc := viper.GetString("theme.success")
+	dim := viper.GetString("theme.dim")
+	if p == "" { p = "62" }
+	if sec == "" { sec = "230" }
+	if errColor == "" { errColor = "196" }
+	if suc == "" { suc = "42" }
+	if dim == "" { dim = "240" }
+	InitStyles(p, sec, errColor, suc, dim)
+
 	return viper.WriteConfigAs("tdl.toml")
 }
 

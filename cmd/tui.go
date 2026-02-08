@@ -27,10 +27,10 @@ func NewTUI() *cobra.Command {
 				return fmt.Errorf("open kv storage: %w", err)
 			}
 
-			m := tui.NewModel(kvd)
+			m := tui.NewModel(s, kvd, ns)
 
 			// Start Bubble Tea program
-			p := tea.NewProgram(m, tea.WithAltScreen())
+			p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 			m.SetProgram(p) // Inject program reference
 			if _, err := p.Run(); err != nil {
 				fmt.Printf("Error starting TUI: %v\n", err)
