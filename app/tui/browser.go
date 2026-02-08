@@ -8,10 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/gotd/td/tg"
-	
-	"github.com/iyear/tdl/pkg/tclient"
 )
-
 // Messages
 type dialogsMsg struct {
 	Dialogs []DialogItem
@@ -197,26 +194,30 @@ func (m *Model) GetDialogs() tea.Cmd {
 
 func (m *Model) GetHistory(peer tg.InputPeerClass) tea.Cmd {
 	return func() tea.Msg {
-		ctx := context.Background()
-		opts := tclient.Options{KV: m.storage}
-		client, err := tclient.New(ctx, opts, false)
-		if err != nil {
-			return historyMsg{Err: err}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		m.clientMu.Lock()
+		client := m.Client
+		m.clientMu.Unlock()
+		
+		if client == nil {
+			return historyMsg{Err: fmt.Errorf("client not connected")}
 		}
 
 		var items []MessageItem
 		
-		err = client.Run(ctx, func(ctx context.Context) error {
-			raw := tg.NewClient(client)
+		// Use persistent client
+		raw := tg.NewClient(client)
 			
-			// Get History
-			histRes, err := raw.MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
-				Peer: peer,
-				Limit: 50,
-			})
-			if err != nil {
-				return err
-			}
+		// Get History
+		histRes, err := raw.MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
+			Peer: peer,
+			Limit: 50,
+		})
+		if err != nil {
+			return historyMsg{Err: err}
+		}
 			
 			// Resolve PeerID for link construction
 			var peerID int64
@@ -270,12 +271,6 @@ func (m *Model) GetHistory(peer tg.InputPeerClass) tea.Cmd {
 					})
 				}
 			}
-			return nil
-		})
-		
-		if err != nil {
-			return historyMsg{Err: err}
-		}
 		
 		return historyMsg{Messages: items}
 	}

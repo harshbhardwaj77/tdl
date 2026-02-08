@@ -7,16 +7,15 @@ import (
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
-
+	
 	"github.com/spf13/viper"
+	"github.com/iyear/tdl/pkg/consts"
 	"github.com/iyear/tdl/app/dl"
 	"github.com/iyear/tdl/app/chat"
 	"github.com/iyear/tdl/app/forward"
 	"github.com/gotd/td/tg"
 	"github.com/iyear/tdl/core/forwarder"
 	"github.com/iyear/tdl/core/logctx"
-	"github.com/iyear/tdl/pkg/consts"
-	"github.com/iyear/tdl/pkg/tclient"
 )
 
 func (m *Model) startDownload(url string) tea.Cmd {
@@ -53,25 +52,24 @@ func (m *Model) startDownload(url string) tea.Cmd {
 		// We should probably keep a persistent client or recreate it.
 		// Recreating it is safer for now.
 		
-		tOpts := tclient.Options{
-			KV:               m.storage,
-			Proxy:            viper.GetString(consts.FlagProxy),
-			NTP:              viper.GetString(consts.FlagNTP),
-			ReconnectTimeout: viper.GetDuration(consts.FlagReconnectTimeout),
-		}
+		// Use persistent client
+		m.clientMu.Lock()
+		client := m.Client
+		m.clientMu.Unlock()
 		
-		client, err := tclient.New(ctx, tOpts, false)
-		if err != nil {
-			return ProgressMsg{Name: url, Err: err, IsFinished: true}
+		if client == nil {
+			return ProgressMsg{Name: url, Err: fmt.Errorf("client not connected"), IsFinished: true}
 		}
+
+		// Inject TUI progress and enable Silent mode
+		opts.Silent = true
+		opts.ExternalProgress = NewTUIProgress(prog)
 		
-		return client.Run(ctx, func(ctx context.Context) error {
-			// Inject TUI progress and enable Silent mode
-			opts.Silent = true
-			opts.ExternalProgress = NewTUIProgress(prog)
-			
-			return dl.Run(logctx.Named(ctx, "dl"), client, storage, opts)
-		})
+		// Run download
+		// dl.Run expects client to be valid.
+		// Note: dl.Run might block. We are in a tea.Cmd (goroutine), so it's fine.
+		err := dl.Run(logctx.Named(ctx, "dl"), client, storage, opts)
+		return ProgressMsg{Name: url, Err: err, IsFinished: true}
 	}
 }
 
@@ -101,23 +99,18 @@ func (m *Model) startBatchDownload(path string) tea.Cmd {
 			Continue: viper.GetBool("continue"),
 		}
 		
-		tOpts := tclient.Options{
-			KV:               storage,
-			Proxy:            viper.GetString(consts.FlagProxy),
-			NTP:              viper.GetString(consts.FlagNTP),
-			ReconnectTimeout: viper.GetDuration(consts.FlagReconnectTimeout),
-		}
+		// Use persistent client
+		m.clientMu.Lock()
+		client := m.Client
+		m.clientMu.Unlock()
 		
-		client, err := tclient.New(ctx, tOpts, false)
-		if err != nil {
-			return ProgressMsg{Name: path, Err: err, IsFinished: true}
+		if client == nil {
+			return ProgressMsg{Name: path, Err: fmt.Errorf("client not connected"), IsFinished: true}
 		}
-		
-		return client.Run(ctx, func(ctx context.Context) error {
-			opts.Silent = true
-			opts.ExternalProgress = NewTUIProgress(prog)
-			return dl.Run(logctx.Named(ctx, "dl"), client, storage, opts)
-		})
+
+		opts.Silent = true
+		opts.ExternalProgress = NewTUIProgress(prog)
+		return dl.Run(logctx.Named(ctx, "dl"), client, storage, opts)
 	}
 }
 
@@ -139,21 +132,15 @@ func (m *Model) startExport(d DialogItem) tea.Cmd {
 			Filter: "true",
 		}
 
-		tOpts := tclient.Options{
-			KV:               storage,
-			Proxy:            viper.GetString(consts.FlagProxy),
-			NTP:              viper.GetString(consts.FlagNTP),
-			ReconnectTimeout: viper.GetDuration(consts.FlagReconnectTimeout),
+		m.clientMu.Lock()
+		client := m.Client
+		m.clientMu.Unlock()
+		
+		if client == nil {
+			return ExportMsg{Err: fmt.Errorf("client not connected")}
 		}
 
-		client, err := tclient.New(ctx, tOpts, false)
-		if err != nil {
-			return ExportMsg{Err: err}
-		}
-
-		err = client.Run(ctx, func(ctx context.Context) error {
-			return chat.Export(logctx.Named(ctx, "export"), client, storage, opts)
-		})
+		err := chat.Export(logctx.Named(ctx, "export"), client, storage, opts)
 		
 		return ExportMsg{Path: filename, Err: err}
 	}
@@ -194,21 +181,15 @@ func (m *Model) startForward(dest string, sources []string) tea.Cmd {
 			Silent: true,
 		}
 
-		tOpts := tclient.Options{
-			KV:               storage,
-			Proxy:            viper.GetString(consts.FlagProxy),
-			NTP:              viper.GetString(consts.FlagNTP),
-			ReconnectTimeout: viper.GetDuration(consts.FlagReconnectTimeout),
+		m.clientMu.Lock()
+		client := m.Client
+		m.clientMu.Unlock()
+		
+		if client == nil {
+			return ExportMsg{Err: fmt.Errorf("client not connected")}
 		}
 
-		client, err := tclient.New(ctx, tOpts, false)
-		if err != nil {
-			return ExportMsg{Err: fmt.Errorf("client init: %w", err)} // Reuse msg or new one?
-		}
-
-		err = client.Run(ctx, func(ctx context.Context) error {
-			return forward.Run(logctx.Named(ctx, "forward"), client, storage, opts)
-		})
+		err := forward.Run(logctx.Named(ctx, "forward"), client, storage, opts)
 		return ExportMsg{Path: "Forwarded", Err: err} // Reusing ExportMsg for simplicity for now
 	}
 }
