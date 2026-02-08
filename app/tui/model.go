@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -98,6 +99,7 @@ type Model struct {
 	Client     *telegram.Client
 	ClientCtx  context.Context
 	ClientCancel context.CancelFunc
+	clientMu   sync.Mutex
 }
 
 type loginMsg struct {
@@ -199,6 +201,9 @@ func (m *Model) Init() tea.Cmd {
 }
 
 func (m *Model) startClient() tea.Msg {
+	m.clientMu.Lock()
+	defer m.clientMu.Unlock()
+
 	// Cleanup existing client if any
 	if m.ClientCancel != nil {
 		m.ClientCancel()

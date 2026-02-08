@@ -77,7 +77,12 @@ func logToFile(msg string) {
 func (m *Model) GetDialogs() tea.Cmd {
 	return func() tea.Msg {
 		logToFile("GetDialogs: Starting")
-		if m.Client == nil {
+		
+		m.clientMu.Lock()
+		client := m.Client
+		m.clientMu.Unlock()
+		
+		if client == nil {
 			logToFile("GetDialogs: Client is nil")
 			return dialogsMsg{Err: fmt.Errorf("client not connected")}
 		}
@@ -86,7 +91,7 @@ func (m *Model) GetDialogs() tea.Cmd {
 		defer cancel()
 		
 		// Use persistent client
-		raw := tg.NewClient(m.Client)
+		raw := tg.NewClient(client)
 		
 		logToFile("GetDialogs: Fetching API")
 		dlgRes, err := raw.MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
