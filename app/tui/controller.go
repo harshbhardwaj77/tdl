@@ -214,36 +214,43 @@ func (m *Model) startForward(dest string, sources []string) tea.Cmd {
 }
 
 func (m *Model) SearchPeers(query string) tea.Cmd {
-	storage := m.storage
 	return func() tea.Msg {
 		if query == "" { return nil }
 		ctx := context.Background()
 
-		tOpts := tclient.Options{
-			KV:               storage,
-			Proxy:            viper.GetString(consts.FlagProxy),
-			NTP:              viper.GetString(consts.FlagNTP),
-			ReconnectTimeout: viper.GetDuration(consts.FlagReconnectTimeout),
-		}
-
-		client, err := tclient.New(ctx, tOpts, false)
-		if err != nil {
-			return dialogsMsg{Err: err}
+		m.clientMu.Lock()
+		client := m.Client
+		m.clientMu.Unlock()
+		
+		if client == nil {
+			return dialogsMsg{Err: fmt.Errorf("client not connected")}
 		}
 
 		var results []DialogItem
 
-		err = client.Run(ctx, func(ctx context.Context) error {
-			res, err := client.API().ContactsSearch(ctx, &tg.ContactsSearchRequest{
-				Q:     query,
-				Limit: 20,
-			})
-			if err != nil {
-				return err
-			}
+		// Use m.Client.API() equivalent but context bound
+		// client.API() returns *tg.Client
+		// We can just use tg.NewClient(client)
+		raw := tg.NewClient(client)
+		
+		// Run in goroutine to not block? No, tea.Cmd is async.
+		// But we need to use 'client' which is running in another goroutine.
+		// We can call methods on it safely? Yes `gotd` client is thread safe.
+		
+		// Wait, `StartClient` does `client.Run`.
+		// We can use `client` concurrently.
+		
+		res, err := raw.ContactsSearch(ctx, &tg.ContactsSearchRequest{
+			Q:     query,
+			Limit: 20,
+		})
+		if err != nil {
+			return dialogsMsg{Err: err}
+		}
 
-			// gotd might return concrete type for ContactsSearch
-			found := res
+		// Process results
+		found := res
+		// ... logic continues ...
 			// Check if it's interface or struct
 			// If it was interface, previous code would work.
 			// Error said "is not an interface", so it's struct.
@@ -315,9 +322,6 @@ func (m *Model) SearchPeers(query string) tea.Cmd {
 					Peer:   inputPeer,
 				})
 			}
-			return nil
-		})
-
-		return dialogsMsg{Dialogs: results, Err: err}
+	return dialogsMsg{Dialogs: results}
 	}
 }

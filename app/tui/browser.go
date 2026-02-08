@@ -95,7 +95,8 @@ func (m *Model) GetDialogs() tea.Cmd {
 		
 		logToFile("GetDialogs: Fetching API")
 		dlgRes, err := raw.MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
-			Limit: 20,
+			Limit:      20,
+			OffsetPeer: &tg.InputPeerEmpty{},
 		})
 		if err != nil {
 			logToFile("GetDialogs: API Error: " + err.Error())
