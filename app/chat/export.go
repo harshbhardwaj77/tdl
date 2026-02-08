@@ -39,6 +39,7 @@ type ExportOptions struct {
 	Raw         bool
 	All         bool
 	Silent      bool // TUI integration
+	Progress    func(count int64) // Callback for progress updates
 }
 
 type Message struct {
@@ -216,6 +217,9 @@ loop:
 
 		count++
 		tracker.SetValue(count)
+		if opts.Progress != nil {
+			opts.Progress(count)
+		}
 	}
 
 	if err = iter.Err(); err != nil {

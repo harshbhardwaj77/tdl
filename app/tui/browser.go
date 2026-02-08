@@ -13,6 +13,10 @@ import (
 type dialogsMsg struct {
 	Dialogs []DialogItem
 	Err     error
+	// Pagination
+	NextPeer tg.InputPeerClass
+	NextDate int
+	NextID   int
 }
 
 type historyMsg struct {
@@ -71,9 +75,9 @@ func logToFile(msg string) {
 	f.WriteString(time.Now().Format(time.RFC3339) + ": " + msg + "\n")
 }
 
-func (m *Model) GetDialogs() tea.Cmd {
+func (m *Model) GetDialogs(offsetPeer tg.InputPeerClass, offsetDate, offsetID int) tea.Cmd {
 	return func() tea.Msg {
-		logToFile("GetDialogs: Starting")
+		logToFile(fmt.Sprintf("GetDialogs: Starting (Date: %d, ID: %d)", offsetDate, offsetID))
 		
 		m.clientMu.Lock()
 		client := m.Client
@@ -90,10 +94,17 @@ func (m *Model) GetDialogs() tea.Cmd {
 		// Use persistent client
 		raw := tg.NewClient(client)
 		
+		// Handle nil offsetPeer
+		if offsetPeer == nil {
+			offsetPeer = &tg.InputPeerEmpty{}
+		}
+
 		logToFile("GetDialogs: Fetching API")
 		dlgRes, err := raw.MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
 			Limit:      20,
-			OffsetPeer: &tg.InputPeerEmpty{},
+			OffsetPeer: offsetPeer,
+			OffsetDate: offsetDate,
+			OffsetID:   offsetID,
 		})
 		if err != nil {
 			logToFile("GetDialogs: API Error: " + err.Error())
@@ -106,6 +117,7 @@ func (m *Model) GetDialogs() tea.Cmd {
 			dialogs []tg.DialogClass
 			chats   []tg.ChatClass
 			users   []tg.UserClass
+			messages []tg.MessageClass
 		)
 		
 		switch d := dlgRes.(type) {
@@ -113,13 +125,76 @@ func (m *Model) GetDialogs() tea.Cmd {
 			dialogs = d.Dialogs
 			chats = d.Chats
 			users = d.Users
+			messages = d.Messages
 		case *tg.MessagesDialogsSlice:
 			dialogs = d.Dialogs
 			chats = d.Chats
 			users = d.Users
+			messages = d.Messages
 		}
 		
 		logToFile(fmt.Sprintf("GetDialogs: Found %d dialogs", len(dialogs)))
+		
+		// Calculate Next Offsets
+		var nextPeer tg.InputPeerClass
+		var nextDate, nextID int
+		
+		if len(dialogs) > 0 {
+			lastDlg := dialogs[len(dialogs)-1]
+			if d, ok := lastDlg.(*tg.Dialog); ok {
+				// Find valid Peer
+				// We need InputPeer for the next request
+				// We can try to construct it from the dialog peer
+				
+				// Helper to find message by ID to get date?
+				// Dialog struct:
+				// Flash: ...
+				// Peer: PeerClass
+				// TopMessage: int
+				// ReadInboxMaxId: int
+				// ...
+				
+				// Using TopMessage ID to find the message content for Date?
+				// Or check if Dialog has date? No.
+				// We need to look up the message in `messages` slice.
+				
+				nextID = d.TopMessage
+				
+				// Find message with this ID
+				for _, msg := range messages {
+					if m, ok := msg.(*tg.Message); ok && m.ID == nextID {
+						nextDate = m.Date
+						break
+					}
+					if m, ok := msg.(*tg.MessageService); ok && m.ID == nextID {
+						nextDate = m.Date
+						break
+					}
+				}
+				
+				// Construct InputPeer
+				switch p := d.Peer.(type) {
+				case *tg.PeerUser:
+					for _, u := range users {
+						if user, ok := u.(*tg.User); ok && user.ID == p.UserID {
+							nextPeer = &tg.InputPeerUser{UserID: user.ID, AccessHash: user.AccessHash}
+							break
+						}
+					}
+					if nextPeer == nil { nextPeer = &tg.InputPeerUser{UserID: p.UserID} }
+				case *tg.PeerChat:
+					nextPeer = &tg.InputPeerChat{ChatID: p.ChatID}
+				case *tg.PeerChannel:
+					for _, c := range chats {
+						if ch, ok := c.(*tg.Channel); ok && ch.ID == p.ChannelID {
+							nextPeer = &tg.InputPeerChannel{ChannelID: ch.ID, AccessHash: ch.AccessHash}
+							break
+						}
+					}
+					if nextPeer == nil { nextPeer = &tg.InputPeerChannel{ChannelID: p.ChannelID} }
+				}
+			}
+		}
 
 		// Map peers
 		peerMap := make(map[int64]string)
@@ -188,7 +263,13 @@ func (m *Model) GetDialogs() tea.Cmd {
 		}
 		
 		logToFile(fmt.Sprintf("GetDialogs: Finished with %d items", len(items)))
-		return dialogsMsg{Dialogs: items}
+		
+		return dialogsMsg{
+			Dialogs: items,
+			NextPeer: nextPeer,
+			NextDate: nextDate,
+			NextID:   nextID,
+		}
 	}
 }
 

@@ -54,7 +54,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Trigger dialog fetch if needed
 				if len(m.Dialogs.Items()) == 0 {
 					m.LoadingDialogs = true
-					return m, tea.Batch(m.GetDialogs(), m.spinner.Tick)
+					return m, tea.Batch(m.GetDialogs(nil, 0, 0), m.spinner.Tick)
 				}
 				return m, nil
 			case "esc", "q":
@@ -132,14 +132,32 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	
 	case dialogsMsg:
 		m.LoadingDialogs = false
+		
+		// Update Offsets
+		m.NextOffsetPeer = msg.NextPeer
+		m.NextOffsetDate = msg.NextDate
+		m.NextOffsetID = msg.NextID
+
 		if msg.Err != nil {
-			// Handle error (maybe show in status bar)
+			// Handle error
 		} else {
 			items := make([]list.Item, len(msg.Dialogs))
 			for i, d := range msg.Dialogs {
 				items[i] = d
 			}
-			m.Dialogs.SetItems(items)
+			
+			if m.IsPaginating {
+				// Append
+				// Create new slice with old + new
+				// list.Model doesn't have Append? It has InsertItem.
+				// Or SetItems with combined list.
+				oldItems := m.Dialogs.Items()
+				newItems := append(oldItems, items...)
+				m.Dialogs.SetItems(newItems)
+				m.IsPaginating = false
+			} else {
+				m.Dialogs.SetItems(items)
+			}
 		}
 	
 	case historyMsg:
@@ -153,6 +171,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.Messages.SetItems(items)
 		}
+
+	case ExportProgressMsg:
+		m.StatusMessage = fmt.Sprintf("Exporting... %d messages processed", int64(msg))
+		return m, nil
 
 	case ExportMsg:
 		m.LoadingExport = false
@@ -261,8 +283,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.ActiveTab = 1
 				if len(m.Dialogs.Items()) == 0 {
 					m.LoadingDialogs = true
-					return m, tea.Batch(m.GetDialogs(), m.spinner.Tick)
+					return m, tea.Batch(m.GetDialogs(nil, 0, 0), m.spinner.Tick)
 				}
+			}
+			return m, nil
+		case "L":
+			if m.ActiveTab == 1 && !m.PickingDest {
+				m.IsPaginating = true
+				m.LoadingDialogs = true
+				return m, tea.Batch(
+					m.GetDialogs(m.NextOffsetPeer, m.NextOffsetDate, m.NextOffsetID), 
+					m.spinner.Tick,
+				)
 			}
 			return m, nil
 		case "l":
@@ -447,7 +479,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						// Trigger fetch dialogs if empty
 						if len(m.Dialogs.Items()) == 0 {
 							m.LoadingDialogs = true
-							return m, tea.Batch(m.GetDialogs(), m.spinner.Tick)
+							return m, tea.Batch(m.GetDialogs(nil, 0, 0), m.spinner.Tick)
 						}
 					}
 					return m, nil

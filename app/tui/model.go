@@ -48,6 +48,11 @@ type Model struct {
 	Pane       int // 0: Dialogs (Left), 1: Messages (Right)
 	SelectedApp *tclient.App
 	LoadingDialogs bool
+	IsPaginating   bool
+	NextOffsetPeer tg.InputPeerClass
+	NextOffsetDate int
+	NextOffsetID   int
+	
 	LoadingHistory bool
 	LoadingExport  bool
 	Searching      bool // Global Search input mode
@@ -116,6 +121,8 @@ type ExportMsg struct {
 	Path string
 	Err  error
 }
+
+type ExportProgressMsg int64
 
 type AccountsMsg struct {
 	Accounts []string
@@ -209,6 +216,7 @@ func (m *Model) Init() tea.Cmd {
 		m.spinner.Tick,
 		m.startClient, // Start the persistent connection
 		m.GetAccounts(),
+		m.GetDialogs(nil, 0, 0), // Initial load
 	)
 }
 

@@ -76,6 +76,7 @@ func (m *Model) viewHelpModal(bg string) string {
 		"  e         Export Chat Info",
 		"  j         Batch Process (JSON)",
 		"  a         Switch Account",
+		"  L         Load More Chats",
 		"  l         Downloads Tab",
 		"",
 		"  ?         Close Help",
@@ -160,7 +161,7 @@ func (m *Model) viewBrowser() string {
 	if m.PickingDest {
 		s += StatusBarStyle.Render("\n  [Enter] Confirm Destination (Forward) • [Esc] Cancel")
 	} else {
-		s += StatusBarStyle.Render("\n  [Tab] Switch Pane • [Enter] Select • [Space] Select Msg • [e] Export • [f] Forward")
+		s += StatusBarStyle.Render("\n  [Tab] Pane • [Enter] Select • [Space] Mark • [e] Export • [L] Load More")
 	}
 	
 	if m.LoadingExport {

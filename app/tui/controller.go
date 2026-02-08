@@ -132,6 +132,11 @@ func (m *Model) startExport(d DialogItem, filename string) tea.Cmd {
 			Chat:   strconv.FormatInt(d.PeerID, 10),
 			Silent: true,
 			Filter: "true",
+			Progress: func(count int64) {
+				if m.tuiProgram != nil {
+					m.tuiProgram.Send(ExportProgressMsg(count))
+				}
+			},
 		}
 
 		m.clientMu.Lock()
