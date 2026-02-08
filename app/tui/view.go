@@ -164,10 +164,12 @@ func (m *Model) viewBrowser() string {
 		s += StatusBarStyle.Render("\n  [Tab] Pane • [Enter] Select • [Space] Mark • [e] Export • [L] Load More")
 	}
 	
-	if m.LoadingExport {
+	if m.StatusMessage != "" {
+		color := ColorSuccess
+		if m.LoadingExport { color = ColorPrimary }
+		s += lipgloss.NewStyle().Foreground(color).Render("\n  " + m.StatusMessage)
+	} else if m.LoadingExport {
 		s += lipgloss.NewStyle().Foreground(ColorPrimary).Render("\n  ⏳ Exporting chat info... This may take a while.")
-	} else if m.StatusMessage != "" {
-		s += lipgloss.NewStyle().Foreground(ColorSuccess).Render("\n  " + m.StatusMessage)
 	} else if !m.PickingDest {
 		// Show selection count
 		count := 0
