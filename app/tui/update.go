@@ -194,26 +194,50 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.ShowHelp = false
 				return m, nil
 			}
-			// Let Esc fall through for other logic (Input blur, List filter clear)
+			// History Pop
+			if len(m.TabHistory) > 0 {
+				last := m.TabHistory[len(m.TabHistory)-1]
+				m.TabHistory = m.TabHistory[:len(m.TabHistory)-1]
+				m.ActiveTab = last
+				// Restore State
+				switch last {
+				case 0: m.state = stateDashboard
+				case 1: m.state = stateDashboard // Browser shares state usually or we can verify
+				case 2: m.state = stateDownloads
+				}
+				return m, nil
+			}
+			// Fallthrough to global quit checking if history empty?
+			// Or just do nothing.
+			
 		}
 
 		// 2. Global Navigation (Safe Keys)
 		// j is excluded here to allow list navigation in Browser
 		switch msg.String() {
 		case "d":
-			m.state = stateDashboard
-			m.ActiveTab = 0
+			if m.ActiveTab != 0 {
+				m.TabHistory = append(m.TabHistory, m.ActiveTab)
+				m.state = stateDashboard
+				m.ActiveTab = 0
+			}
 			return m, nil
 		case "b":
-			m.ActiveTab = 1
-			if len(m.Dialogs.Items()) == 0 {
-				m.LoadingDialogs = true
-				return m, tea.Batch(m.GetDialogs(), m.spinner.Tick)
+			if m.ActiveTab != 1 {
+				m.TabHistory = append(m.TabHistory, m.ActiveTab)
+				m.ActiveTab = 1
+				if len(m.Dialogs.Items()) == 0 {
+					m.LoadingDialogs = true
+					return m, tea.Batch(m.GetDialogs(), m.spinner.Tick)
+				}
 			}
 			return m, nil
 		case "l":
-			m.state = stateDownloads
-			m.ActiveTab = 2
+			if m.ActiveTab != 2 {
+				m.TabHistory = append(m.TabHistory, m.ActiveTab)
+				m.state = stateDownloads
+				m.ActiveTab = 2
+			}
 			return m, nil
 		case "c":
 			m.state = stateConfig
@@ -373,21 +397,29 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Dashboard ~12 chars, Browser ~10 chars, Downloads ~12 chars
 				// Padding adds to it.
 				if msg.X >= 0 && msg.X < 15 {
-					m.ActiveTab = 0
-					m.state = stateDashboard
+					if m.ActiveTab != 0 {
+						m.TabHistory = append(m.TabHistory, m.ActiveTab)
+						m.ActiveTab = 0
+						m.state = stateDashboard
+					}
 					return m, nil
 				} else if msg.X >= 15 && msg.X < 30 {
-					m.ActiveTab = 1
-					m.state = stateDashboard // or specific state
-					// Trigger fetch dialogs if empty
-					if len(m.Dialogs.Items()) == 0 {
-						m.LoadingDialogs = true
-						return m, tea.Batch(m.GetDialogs(), m.spinner.Tick)
+					if m.ActiveTab != 1 {
+						m.TabHistory = append(m.TabHistory, m.ActiveTab)
+						m.ActiveTab = 1
+						// Trigger fetch dialogs if empty
+						if len(m.Dialogs.Items()) == 0 {
+							m.LoadingDialogs = true
+							return m, tea.Batch(m.GetDialogs(), m.spinner.Tick)
+						}
 					}
 					return m, nil
 				} else if msg.X >= 30 && msg.X < 50 {
-					m.ActiveTab = 2
-					m.state = stateDownloads
+					if m.ActiveTab != 2 {
+						m.TabHistory = append(m.TabHistory, m.ActiveTab)
+						m.ActiveTab = 2
+						m.state = stateDownloads
+					}
 					return m, nil
 				}
 			}

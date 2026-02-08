@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -67,43 +68,45 @@ func (m MessageItem) Description() string {
 }
 
 // Commands
+func logToFile(msg string) {
+	f, _ := os.OpenFile("tui_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	defer f.Close()
+	f.WriteString(time.Now().Format(time.RFC3339) + ": " + msg + "\n")
+}
+
 func (m *Model) GetDialogs() tea.Cmd {
 	return func() tea.Msg {
-		ctx := context.Background()
+		logToFile("GetDialogs: Starting")
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
 		
 		// Create client (reusing logic from checkLogin or ideally persistent client)
 		// For now creating new client each time is inefficient but safest without refactoring everything
 		opts := tclient.Options{KV: m.storage}
 		client, err := tclient.New(ctx, opts, false)
 		if err != nil {
+			logToFile("GetDialogs: Client Init Error: " + err.Error())
 			return dialogsMsg{Err: err}
 		}
 
 		var items []DialogItem
 		
 		err = client.Run(ctx, func(ctx context.Context) error {
-			// Get Dialogs
-			// We use raw API for full control or high level if available
+			logToFile("GetDialogs: Client Running")
 			// Get Dialogs
 			// We use raw API for full control or high level if available
 			// gotd has 'message' package helper
 			raw := tg.NewClient(client)
 			
-			// Simple get dialogs
-			// Limit 20 for now
-			// We need to fetch peers manually using raw.MessagesGetDialogs
-			// helper: sender.Resolve(name)
-			
-			// Using helper
-			// We need to implement proper dialog fetching.
-			// messages.getDialogs offset_date:int offset_id:int offset_peer:InputPeer limit:int hash:long = messages.Dialogs;
-			
+			logToFile("GetDialogs: Fetching API")
 			dlgRes, err := raw.MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
 				Limit: 20,
 			})
 			if err != nil {
+				logToFile("GetDialogs: API Error: " + err.Error())
 				return err
 			}
+			logToFile(fmt.Sprintf("GetDialogs: API Success, Type: %T", dlgRes))
 			
 			// Process response
 			// It can be MessagesDialogsSlice or MessagesDialogs
@@ -124,6 +127,8 @@ func (m *Model) GetDialogs() tea.Cmd {
 				users = d.Users
 			}
 			
+			logToFile(fmt.Sprintf("GetDialogs: Found %d dialogs", len(dialogs)))
+
 			// Map peers
 			peerMap := make(map[int64]string)
 			for _, u := range users {
@@ -153,7 +158,14 @@ func (m *Model) GetDialogs() tea.Cmd {
 				case *tg.PeerUser:
 					peerID = p.UserID
 					title = peerMap[peerID]
-					inputPeer = &tg.InputPeerUser{UserID: peerID} // AccessHash missing? We need full peer
+					inputPeer = &tg.InputPeerUser{UserID: peerID}
+					// Attempt to find access hash from users list
+					for _, u := range users {
+						if user, ok := u.(*tg.User); ok && user.ID == peerID {
+							inputPeer = &tg.InputPeerUser{UserID: peerID, AccessHash: user.AccessHash}
+							break
+						}
+					}
 				case *tg.PeerChat:
 					peerID = p.ChatID
 					title = peerMap[peerID]
@@ -161,13 +173,21 @@ func (m *Model) GetDialogs() tea.Cmd {
 				case *tg.PeerChannel:
 					peerID = p.ChannelID
 					title = peerMap[peerID]
-					// We need access hash properly effectively...
-					// This simple mapping is risky. 
-					// TDL has 'peers' package or similar?
+					// Attempt to find access hash
+					for _, c := range chats {
+						// Need to check both Chat and Channel types in the Chats list
+						if ch, ok := c.(*tg.Channel); ok && ch.ID == peerID {
+							inputPeer = &tg.InputPeerChannel{ChannelID: peerID, AccessHash: ch.AccessHash}
+							// Also confirm title if missing
+							if title == "" { title = ch.Title }
+							break
+						}
+					}
+					if inputPeer == nil { inputPeer = &tg.InputPeerChannel{ChannelID: peerID} }
 				}
 				
 				if title == "" {
-					title = "Unknown Chat"
+					title = fmt.Sprintf("Unknown Chat %d", peerID)
 				}
 
 				items = append(items, DialogItem{
@@ -182,9 +202,11 @@ func (m *Model) GetDialogs() tea.Cmd {
 		})
 		
 		if err != nil {
+			logToFile("GetDialogs: Run Error: " + err.Error())
 			return dialogsMsg{Err: err}
 		}
 		
+		logToFile(fmt.Sprintf("GetDialogs: Finished with %d items", len(items)))
 		return dialogsMsg{Dialogs: items}
 	}
 }

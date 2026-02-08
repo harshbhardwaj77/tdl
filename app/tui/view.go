@@ -178,7 +178,17 @@ func (m *Model) viewBrowser() string {
 func (m *Model) viewDashboard() string {
 	var s strings.Builder
 
-	s.WriteString("Welcome to TDL TUI\n\n")
+	// Logo
+	logo := `
+████████╗██████╗ ██╗
+╚══██╔══╝██╔══██╗██║
+   ██║   ██║  ██║██║
+   ██║   ██║  ██║██║
+   ██║   ██████╔╝███████╗
+   ╚═╝   ╚═════╝ ╚══════╝`
+	
+	s.WriteString(lipgloss.NewStyle().Foreground(ColorPrimary).Render(logo))
+	s.WriteString("\n\n")
 
 	if m.Connected {
 		s.WriteString(lipgloss.NewStyle().Foreground(ColorSuccess).Render("  You are connected to Telegram."))

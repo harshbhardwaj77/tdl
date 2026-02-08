@@ -34,6 +34,7 @@ const (
 type Model struct {
 	state      sessionState
 	ActiveTab  int // 0: Dashboard, 1: Browser, 2: Downloads
+	TabHistory []int // Navigation stack for Esc key
 	
 	// Browser State
 	Dialogs    list.Model
