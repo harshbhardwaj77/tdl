@@ -194,6 +194,7 @@ func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
 		m.startClient, // Start the persistent connection
+		m.GetAccounts(),
 	)
 }
 
