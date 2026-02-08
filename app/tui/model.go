@@ -207,12 +207,17 @@ func (m *Model) startClient() tea.Msg {
 	// Create context for the client lifecycle
 	m.ClientCtx, m.ClientCancel = context.WithCancel(context.Background())
 	
+	logToFile("StartClient: Context created")
+	
 	// Create the client instance 
-	// We need tclient options
 	opts := tclient.Options{
-		KV: m.storage,
-		// Add other options from config/viper if needed
+		KV:               m.storage,
+		Proxy:            viper.GetString(consts.FlagProxy),
+		NTP:              viper.GetString(consts.FlagNTP),
+		ReconnectTimeout: viper.GetDuration(consts.FlagReconnectTimeout),
 	}
+	
+	logToFile(fmt.Sprintf("StartClient: Options - Proxy: %v, NTP: %v", opts.Proxy != "", opts.NTP))
 	
 	var err error
 	m.Client, err = tclient.New(m.ClientCtx, opts, false)
@@ -235,21 +240,29 @@ func (m *Model) startClient() tea.Msg {
 	errCh := make(chan error)
 	
 	go func() {
+		logToFile("ClientGoroutine: Starting Run")
 		err := m.Client.Run(m.ClientCtx, func(ctx context.Context) error {
 			// Signal ready
+			logToFile("ClientGoroutine: Connected! Signaling Ready")
 			close(readyCh)
 			// Choose to block until context is done
 			<-ctx.Done()
+			logToFile("ClientGoroutine: Context Done, Exiting")
 			return ctx.Err()
 		})
 		if err != nil && err != context.Canceled {
+			logToFile("ClientGoroutine: Error: " + err.Error())
 			errCh <- err
+		} else {
+			logToFile("ClientGoroutine: Stopped Gracefully")
 		}
 	}()
 	
 	// Wait for ready or error
+	logToFile("StartClient: Waiting for Ready signal...")
 	select {
 	case <-readyCh:
+		logToFile("StartClient: Received Ready signal")
 		// Client is running. Now check auth.
 		// We need to use m.ClientCtx or a sub-context
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
