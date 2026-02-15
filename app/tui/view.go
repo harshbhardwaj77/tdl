@@ -42,6 +42,8 @@ func (m *Model) View() string {
 		s += m.viewDownloads()
 	case stateExportPrompt:
 		s += m.viewExportPrompt()
+	case stateDownloadOptions:
+		s += m.viewDownloadOptions()
 	default:
 		// ActiveTab handling when on dashboard/browser
 		if m.ActiveTab == 1 {
@@ -58,6 +60,70 @@ func (m *Model) View() string {
 	}
 
 	return s
+}
+
+func (m *Model) viewDownloadOptions() string {
+	var s strings.Builder
+	s.WriteString(TitleStyle.Render("Download Configuration"))
+	s.WriteString("\n\n")
+
+	s.WriteString(fmt.Sprintf("Target: %s\n\n", m.DLForm.UrlOrPath))
+
+	// Helpers for form rendering
+	focused := func(idx int) lipgloss.Style {
+		if m.DLForm.ActiveIndex == idx {
+			return lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true)
+		}
+		return lipgloss.NewStyle().Foreground(ColorDim)
+	}
+
+	checkbox := func(label string, checked bool, idx int) string {
+		icon := "[ ]"
+		if checked {
+			icon = "[x]"
+		}
+		style := focused(idx)
+		return style.Render(fmt.Sprintf("%s %s", icon, label))
+	}
+
+	// 0: Dir
+	s.WriteString(focused(0).Render("Directory:") + "\n")
+	s.WriteString(m.DLForm.Dir.View() + "\n\n")
+
+	// 1: Template
+	s.WriteString(focused(1).Render("Filename Template:") + "\n")
+	s.WriteString(m.DLForm.Template.View() + "\n\n")
+
+	// Options Grid
+	// Group | SkipSame | Takeout
+	// Desc
+
+	s.WriteString(checkbox("Group Media", m.DLForm.Group, 2) + "\n")
+	s.WriteString(checkbox("Skip Duplicates", m.DLForm.SkipSame, 3) + "\n")
+	s.WriteString(checkbox("Takeout Session", m.DLForm.Takeout, 4) + "\n")
+	s.WriteString(checkbox("Reverse Order", m.DLForm.Desc, 5) + "\n\n")
+
+	// Buttons
+	btnStart := "[ Start Download ]"
+	if m.DLForm.ActiveIndex == 6 {
+		btnStart = ActiveTabStyle.Render("[ Start Download ]")
+	} else {
+		btnStart = InactiveTabStyle.Render("[ Start Download ]")
+	}
+
+	btnCancel := "[ Cancel ]"
+	if m.DLForm.ActiveIndex == 7 {
+		btnCancel = ActiveTabStyle.Render("[ Cancel ]")
+	} else {
+		btnCancel = InactiveTabStyle.Render("[ Cancel ]")
+	}
+
+	s.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, btnStart, "  ", btnCancel))
+
+	s.WriteString("\n\n")
+	s.WriteString(StatusBarStyle.Render("[Tab/Arrows] Navigate • [Enter] Toggle/Select • [Esc] Cancel"))
+
+	return s.String()
 }
 
 func (m *Model) viewHelpModal(bg string) string {
@@ -250,7 +316,7 @@ func (m *Model) viewDashboard() string {
 	if m.StatusMessage != "" {
 		s.WriteString(lipgloss.NewStyle().Foreground(ColorPrimary).Render("  " + m.StatusMessage + "\n"))
 	}
-	s.WriteString(StatusBarStyle.Render(fmt.Sprintf("tdl %s • %s • [?] Help", m.BuildInfo, m.Namespace)))
+	s.WriteString(StatusBarStyle.Render(fmt.Sprintf("tdl %s • %s • [j] Batch • [?] Help", m.BuildInfo, m.Namespace)))
 
 	return s.String()
 }
@@ -262,6 +328,12 @@ func (m *Model) viewDownloads() string {
 	if len(m.Downloads) == 0 {
 		s.WriteString("  No active downloads.\n\n")
 		s.WriteString(lipgloss.NewStyle().Foreground(ColorDim).Render("  Press 'i' to start a new download from a URL."))
+		s.WriteString(lipgloss.NewStyle().Foreground(ColorDim).Render("\n  Press 'j' to start a Batch Download (JSON)."))
+
+		if m.input.Focused() {
+			s.WriteString("\n\n  " + m.input.View())
+		}
+
 		return s.String()
 	}
 
@@ -296,6 +368,10 @@ func (m *Model) viewDownloads() string {
 		}
 
 		s.WriteString("  " + status + "\n")
+	}
+
+	if m.input.Focused() {
+		s.WriteString("\n\n  " + m.input.View())
 	}
 
 	return s.String()

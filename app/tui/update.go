@@ -13,6 +13,11 @@ import (
 )
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Download Options Intercept
+	if m.state == stateDownloadOptions {
+		return m.updateDownloadOptions(msg)
+	}
+
 	// Global Config Editor Intercept
 	if m.state == stateConfig {
 		return m.updateConfig(msg)
@@ -42,9 +47,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg, ok := msg.(tea.KeyMsg); ok {
 			switch msg.String() {
 			case "d", "enter":
-				m.state = stateDownloads
-				m.ActiveTab = 2
-				return m, m.startBatchDownload(m.BatchPath)
+				// Batch Confirm -> Options Form
+				m.state = stateDownloadOptions
+				m.DLForm.UrlOrPath = m.BatchPath
+				m.DLForm.IsBatch = true
+				m.DLForm.ActiveIndex = 0
+				m.DLForm.Dir.Focus()
+				return m, nil
 			case "f":
 				m.PickingDest = true
 				m.ForwardSource = []string{m.BatchPath}
@@ -351,8 +360,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, tea.Batch(m.SearchPeers(val), m.spinner.Tick)
 				}
 
-				m.ActiveTab = 2 // Switch to downloads
-				return m, m.startDownload(val)
+				m.state = stateDownloadOptions
+				m.DLForm.UrlOrPath = val
+				m.DLForm.IsBatch = false
+				m.DLForm.ActiveIndex = 0
+				m.DLForm.Dir.Focus()
+				return m, nil
 			case "esc":
 				m.Searching = false
 				m.input.Blur()
@@ -562,4 +575,77 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.spinner, cmd = m.spinner.Update(msg)
 	return m, cmd
+}
+
+func (m *Model) updateDownloadOptions(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			m.state = stateDownloads
+			if m.ActiveTab == 1 {
+				m.state = stateDashboard
+			} // Return to browser if that's where we came from?
+			// Actually let's just return to where we were.
+			// Ideally we track previous state, but usually it's Dashboard (Browser) or Downloads tab.
+			// Simple behavior: Go to Downloads tab.
+			m.ActiveTab = 2
+			m.state = stateDownloads
+			return m, nil
+
+		case "up", "shift+tab":
+			m.DLForm.ActiveIndex--
+			if m.DLForm.ActiveIndex < 0 {
+				m.DLForm.ActiveIndex = 7
+			}
+			return m, nil
+
+		case "down", "tab":
+			m.DLForm.ActiveIndex++
+			if m.DLForm.ActiveIndex > 7 {
+				m.DLForm.ActiveIndex = 0
+			}
+			return m, nil
+
+		case "enter":
+			// Action based on index
+			switch m.DLForm.ActiveIndex {
+			case 2:
+				m.DLForm.Group = !m.DLForm.Group
+			case 3:
+				m.DLForm.SkipSame = !m.DLForm.SkipSame
+			case 4:
+				m.DLForm.Takeout = !m.DLForm.Takeout
+			case 5:
+				m.DLForm.Desc = !m.DLForm.Desc
+			case 6: // Start
+				m.state = stateDownloads
+				m.ActiveTab = 2
+				if m.DLForm.IsBatch {
+					return m, m.startBatchDownload(m.DLForm.UrlOrPath)
+				}
+				return m, m.startDownload(m.DLForm.UrlOrPath)
+			case 7: // Cancel
+				m.state = stateDownloads
+				return m, nil
+			}
+			// If on text inputs, Enter might move next?
+			if m.DLForm.ActiveIndex <= 1 {
+				m.DLForm.ActiveIndex++
+			}
+			return m, nil
+		}
+	}
+
+	// Handle Text Input Updates
+	var cmd tea.Cmd
+	if m.DLForm.ActiveIndex == 0 {
+		m.DLForm.Dir, cmd = m.DLForm.Dir.Update(msg)
+		return m, cmd
+	} else if m.DLForm.ActiveIndex == 1 {
+		m.DLForm.Template, cmd = m.DLForm.Template.Update(msg)
+		return m, cmd
+	}
+
+	return m, nil
 }

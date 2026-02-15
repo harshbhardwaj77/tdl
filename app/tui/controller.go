@@ -2,20 +2,20 @@ package tui
 
 import (
 	"context"
-	"strconv"
-	"math"
 	"fmt"
+	"math"
+	"strconv"
 
 	tea "github.com/charmbracelet/bubbletea"
-	
-	"github.com/spf13/viper"
-	"github.com/iyear/tdl/pkg/consts"
-	"github.com/iyear/tdl/app/dl"
-	"github.com/iyear/tdl/app/chat"
-	"github.com/iyear/tdl/app/forward"
+
 	"github.com/gotd/td/tg"
+	"github.com/iyear/tdl/app/chat"
+	"github.com/iyear/tdl/app/dl"
+	"github.com/iyear/tdl/app/forward"
 	"github.com/iyear/tdl/core/forwarder"
 	"github.com/iyear/tdl/core/logctx"
+	"github.com/iyear/tdl/pkg/consts"
+	"github.com/spf13/viper"
 )
 
 func (m *Model) startDownload(url string) tea.Cmd {
@@ -25,38 +25,47 @@ func (m *Model) startDownload(url string) tea.Cmd {
 		if url == "" {
 			return nil
 		}
-		
+
 		// In a real app we'd want to manage context cancellation
-		ctx := context.Background() 
-		
-		// Prepare Options
-		dir := viper.GetString("download_dir")
+		ctx := context.Background()
+
+		// Prepare Options from Form
+		dir := m.DLForm.Dir.Value()
 		if dir == "" {
-			dir = "downloads"
+			dir = viper.GetString("download_dir")
+			if dir == "" {
+				dir = "downloads"
+			}
 		}
-		
+
+		tmpl := m.DLForm.Template.Value()
+		if tmpl == "" {
+			tmpl = viper.GetString(consts.FlagDlTemplate)
+		}
+
 		opts := dl.Options{
-			URLs: []string{url},
-			Dir:  dir,
-			Template: viper.GetString(consts.FlagDlTemplate),
-			Group:    viper.GetBool("group"),
-			SkipSame: viper.GetBool("skip_same"),
-			Takeout:  viper.GetBool("takeout"),
-			Continue: viper.GetBool("continue"),
+			URLs:     []string{url},
+			Dir:      dir,
+			Template: tmpl,
+			Group:    m.DLForm.Group,
+			SkipSame: m.DLForm.SkipSame,
+			Takeout:  m.DLForm.Takeout,
+			Desc:     m.DLForm.Desc,
+			Continue: viper.GetBool("continue"), // Keep this from config for now
 		}
-		
+
 		// We need to run this in a way that respects the existing architecture
 		// The key challenge is that dl.Run takes existing Client and KV
 		// We have KV, but Client is usually created inside tRun or passed in.
 		// In our login check we created a client briefly.
 		// We should probably keep a persistent client or recreate it.
 		// Recreating it is safer for now.
-		
+
 		// Use persistent client
 		m.clientMu.Lock()
 		client := m.Client
 		m.clientMu.Unlock()
-		
+
 		if client == nil {
 			return ProgressMsg{Name: url, Err: fmt.Errorf("client not connected"), IsFinished: true}
 		}
@@ -64,7 +73,7 @@ func (m *Model) startDownload(url string) tea.Cmd {
 		// Inject TUI progress and enable Silent mode
 		opts.Silent = true
 		opts.ExternalProgress = NewTUIProgress(prog)
-		
+
 		// Run download
 		// dl.Run expects client to be valid.
 		// Note: dl.Run might block. We are in a tea.Cmd (goroutine), so it's fine.
@@ -80,30 +89,39 @@ func (m *Model) startBatchDownload(path string) tea.Cmd {
 		if path == "" {
 			return nil
 		}
-		
-		ctx := context.Background() 
-		
-		// Prepare Options (Respected Config)
-		dir := viper.GetString("download_dir")
+
+		ctx := context.Background()
+
+		// Prepare Options from Form
+		dir := m.DLForm.Dir.Value()
 		if dir == "" {
-			dir = "downloads"
+			dir = viper.GetString("download_dir")
+			if dir == "" {
+				dir = "downloads"
+			}
 		}
-		
+
+		tmpl := m.DLForm.Template.Value()
+		if tmpl == "" {
+			tmpl = viper.GetString(consts.FlagDlTemplate)
+		}
+
 		opts := dl.Options{
-			Files: []string{path}, // Use Files instead of URLs
-			Dir:   dir,
-			Template: viper.GetString(consts.FlagDlTemplate),
-			Group:    viper.GetBool("group"),
-			SkipSame: viper.GetBool("skip_same"),
-			Takeout:  viper.GetBool("takeout"),
+			Files:    []string{path}, // Use Files instead of URLs
+			Dir:      dir,
+			Template: tmpl,
+			Group:    m.DLForm.Group,
+			SkipSame: m.DLForm.SkipSame,
+			Takeout:  m.DLForm.Takeout,
+			Desc:     m.DLForm.Desc,
 			Continue: viper.GetBool("continue"),
 		}
-		
+
 		// Use persistent client
 		m.clientMu.Lock()
 		client := m.Client
 		m.clientMu.Unlock()
-		
+
 		if client == nil {
 			return ProgressMsg{Name: path, Err: fmt.Errorf("client not connected"), IsFinished: true}
 		}
@@ -118,12 +136,12 @@ func (m *Model) startExport(d DialogItem, filename string) tea.Cmd {
 	storage := m.storage
 	return func() tea.Msg {
 		ctx := context.Background()
-		
+
 		// Use provided filename
 		if filename == "" {
 			filename = fmt.Sprintf("%d.json", d.PeerID)
 		}
-		
+
 		// Setup Options
 		opts := chat.ExportOptions{
 			Type:   chat.ExportTypeTime,
@@ -142,13 +160,13 @@ func (m *Model) startExport(d DialogItem, filename string) tea.Cmd {
 		m.clientMu.Lock()
 		client := m.Client
 		m.clientMu.Unlock()
-		
+
 		if client == nil {
 			return ExportMsg{Err: fmt.Errorf("client not connected")}
 		}
 
 		err := chat.Export(logctx.Named(ctx, "export"), client, storage, opts)
-		
+
 		return ExportMsg{Path: filename, Err: err}
 	}
 }
@@ -180,7 +198,7 @@ func (m *Model) startForward(dest string, sources []string) tea.Cmd {
 	storage := m.storage
 	return func() tea.Msg {
 		ctx := context.Background()
-		
+
 		opts := forward.Options{
 			From:   sources,
 			To:     dest, // Destination is now dynamic
@@ -191,7 +209,7 @@ func (m *Model) startForward(dest string, sources []string) tea.Cmd {
 		m.clientMu.Lock()
 		client := m.Client
 		m.clientMu.Unlock()
-		
+
 		if client == nil {
 			return ExportMsg{Err: fmt.Errorf("client not connected")}
 		}
@@ -203,13 +221,15 @@ func (m *Model) startForward(dest string, sources []string) tea.Cmd {
 
 func (m *Model) SearchPeers(query string) tea.Cmd {
 	return func() tea.Msg {
-		if query == "" { return nil }
+		if query == "" {
+			return nil
+		}
 		ctx := context.Background()
 
 		m.clientMu.Lock()
 		client := m.Client
 		m.clientMu.Unlock()
-		
+
 		if client == nil {
 			return dialogsMsg{Err: fmt.Errorf("client not connected")}
 		}
@@ -220,14 +240,14 @@ func (m *Model) SearchPeers(query string) tea.Cmd {
 		// client.API() returns *tg.Client
 		// We can just use tg.NewClient(client)
 		raw := tg.NewClient(client)
-		
+
 		// Run in goroutine to not block? No, tea.Cmd is async.
 		// But we need to use 'client' which is running in another goroutine.
 		// We can call methods on it safely? Yes `gotd` client is thread safe.
-		
+
 		// Wait, `StartClient` does `client.Run`.
 		// We can use `client` concurrently.
-		
+
 		res, err := raw.ContactsSearch(ctx, &tg.ContactsSearchRequest{
 			Q:     query,
 			Limit: 20,
@@ -239,77 +259,91 @@ func (m *Model) SearchPeers(query string) tea.Cmd {
 		// Process results
 		found := res
 		// ... logic continues ...
-			// Check if it's interface or struct
-			// If it was interface, previous code would work.
-			// Error said "is not an interface", so it's struct.
-			// We assume found = res works and has .Users etc.
-			
-			// Note: if found is *ContactsFound, it works.
-			
-			// Helper to find title and input peer
-			getTitle := func(peerC tg.PeerClass) (string, int64, tg.InputPeerClass) {
-				var id int64
-				var title string
-				var inputPeer tg.InputPeerClass
+		// Check if it's interface or struct
+		// If it was interface, previous code would work.
+		// Error said "is not an interface", so it's struct.
+		// We assume found = res works and has .Users etc.
 
-				switch p := peerC.(type) {
-				case *tg.PeerUser:
-					id = p.UserID
-					for _, u := range found.Users {
-						switch user := u.(type) {
-						case *tg.User:
-							if user.ID == id {
-								title = user.FirstName + " " + user.LastName
-								if user.Username != "" { title += " (@" + user.Username + ")" }
-								inputPeer = &tg.InputPeerUser{UserID: id, AccessHash: user.AccessHash}
+		// Note: if found is *ContactsFound, it works.
+
+		// Helper to find title and input peer
+		getTitle := func(peerC tg.PeerClass) (string, int64, tg.InputPeerClass) {
+			var id int64
+			var title string
+			var inputPeer tg.InputPeerClass
+
+			switch p := peerC.(type) {
+			case *tg.PeerUser:
+				id = p.UserID
+				for _, u := range found.Users {
+					switch user := u.(type) {
+					case *tg.User:
+						if user.ID == id {
+							title = user.FirstName + " " + user.LastName
+							if user.Username != "" {
+								title += " (@" + user.Username + ")"
 							}
+							inputPeer = &tg.InputPeerUser{UserID: id, AccessHash: user.AccessHash}
 						}
-						if inputPeer != nil { break }
 					}
-					if inputPeer == nil { inputPeer = &tg.InputPeerUser{UserID: id} } // Fallback
-					
-				case *tg.PeerChat:
-					id = p.ChatID
-					for _, c := range found.Chats {
-						switch chat := c.(type) {
-						case *tg.Chat:
-							if chat.ID == id {
-								title = chat.Title
-							}
-						}
-						// Chat usually doesn't need access hash for InputPeerChat
-						if title != "" { break }
+					if inputPeer != nil {
+						break
 					}
-					inputPeer = &tg.InputPeerChat{ChatID: id}
-					
-				case *tg.PeerChannel:
-					id = p.ChannelID
-					for _, c := range found.Chats {
-						switch chat := c.(type) {
-						case *tg.Channel:
-							if chat.ID == id {
-								title = chat.Title
-								inputPeer = &tg.InputPeerChannel{ChannelID: id, AccessHash: chat.AccessHash}
-							}
-						}
-						if inputPeer != nil { break }
-					}
-					if inputPeer == nil { inputPeer = &tg.InputPeerChannel{ChannelID: id} }
 				}
-				
-				if title == "" { title = fmt.Sprintf("Unknown#%d", id) }
-				return title, id, inputPeer
+				if inputPeer == nil {
+					inputPeer = &tg.InputPeerUser{UserID: id}
+				} // Fallback
+
+			case *tg.PeerChat:
+				id = p.ChatID
+				for _, c := range found.Chats {
+					switch chat := c.(type) {
+					case *tg.Chat:
+						if chat.ID == id {
+							title = chat.Title
+						}
+					}
+					// Chat usually doesn't need access hash for InputPeerChat
+					if title != "" {
+						break
+					}
+				}
+				inputPeer = &tg.InputPeerChat{ChatID: id}
+
+			case *tg.PeerChannel:
+				id = p.ChannelID
+				for _, c := range found.Chats {
+					switch chat := c.(type) {
+					case *tg.Channel:
+						if chat.ID == id {
+							title = chat.Title
+							inputPeer = &tg.InputPeerChannel{ChannelID: id, AccessHash: chat.AccessHash}
+						}
+					}
+					if inputPeer != nil {
+						break
+					}
+				}
+				if inputPeer == nil {
+					inputPeer = &tg.InputPeerChannel{ChannelID: id}
+				}
 			}
 
-			// Process Results
-			for _, p := range found.Results {
-				title, id, inputPeer := getTitle(p)
-				results = append(results, DialogItem{
-					Title:  title,
-					PeerID: id,
-					Peer:   inputPeer,
-				})
+			if title == "" {
+				title = fmt.Sprintf("Unknown#%d", id)
 			}
-	return dialogsMsg{Dialogs: results}
+			return title, id, inputPeer
+		}
+
+		// Process Results
+		for _, p := range found.Results {
+			title, id, inputPeer := getTitle(p)
+			results = append(results, DialogItem{
+				Title:  title,
+				PeerID: id,
+				Peer:   inputPeer,
+			})
+		}
+		return dialogsMsg{Dialogs: results}
 	}
 }

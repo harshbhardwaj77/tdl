@@ -7,18 +7,18 @@ import (
 	"sync"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbles/filepicker"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/spf13/viper"
-	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/filepicker"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
-	"github.com/iyear/tdl/pkg/tclient"
 	"github.com/iyear/tdl/pkg/kv"
-	
+	"github.com/iyear/tdl/pkg/tclient"
+	"github.com/spf13/viper"
+
 	"github.com/iyear/tdl/core/storage"
 	"github.com/iyear/tdl/pkg/consts"
 )
@@ -34,82 +34,101 @@ const (
 	stateBatchConfirm
 	stateLogin
 	stateExportPrompt
+	stateDownloadOptions
 )
+
+type DownloadForm struct {
+	UrlOrPath string
+	IsBatch   bool
+
+	// Fields
+	Dir      textinput.Model
+	Template textinput.Model
+
+	// bools
+	Group    bool
+	SkipSame bool
+	Takeout  bool
+	Desc     bool
+
+	ActiveIndex int // 0: Dir, 1: Template, 2: Group, 3: SkipSame, 4: Takeout, 5: Desc, 6: Start, 7: Cancel
+}
 
 type Model struct {
 	state      sessionState
-	ActiveTab  int // 0: Dashboard, 1: Browser, 2: Downloads
+	ActiveTab  int   // 0: Dashboard, 1: Browser, 2: Downloads
 	TabHistory []int // Navigation stack for Esc key
-	
+
 	// Browser State
-	Dialogs    list.Model
-	Messages   list.Model
-	Browsing   bool // True if focused heavily on browser
-	Pane       int // 0: Dialogs (Left), 1: Messages (Right)
-	SelectedApp *tclient.App
+	Dialogs        list.Model
+	Messages       list.Model
+	Browsing       bool // True if focused heavily on browser
+	Pane           int  // 0: Dialogs (Left), 1: Messages (Right)
+	SelectedApp    *tclient.App
 	LoadingDialogs bool
 	IsPaginating   bool
 	NextOffsetPeer tg.InputPeerClass
 	NextOffsetDate int
 	NextOffsetID   int
-	
+
 	LoadingHistory bool
 	LoadingExport  bool
 	Searching      bool // Global Search input mode
-	
+
 	// Forwarding
-	PickingDest    bool // If true, selecting a dialog = forward destination
-	ForwardSource  []string
-	
+	PickingDest   bool // If true, selecting a dialog = forward destination
+	ForwardSource []string
+
 	// Export
-	ExportInput    textinput.Model
-	ExportTarget   DialogItem
-	
+	ExportInput  textinput.Model
+	ExportTarget DialogItem
+
+	// Download Options
+	DLForm DownloadForm
+
 	// UI State
-	ShowHelp       bool
+	ShowHelp bool
 
+	width    int
+	height   int
+	quitting bool
 
-	
-	width      int
-	height     int
-	quitting   bool
-	
 	// Components
-	spinner    spinner.Model
-	list       list.Model
-	viewport   viewport.Model
-	input      textinput.Model
-	
+	spinner  spinner.Model
+	list     list.Model
+	viewport viewport.Model
+	input    textinput.Model
+
 	// Config Editor
 	ConfigInputs     []textinput.Model
 	ConfigFocusIndex int
-	
+
 	// Batch Processing
 	FilePicker filepicker.Model
 	BatchPath  string
-	
+
 	// Data
-	Namespace  string
-	Connected  bool
-	BuildInfo  string
-	User       *tg.User
-	Downloads  map[string]*DownloadItem
-	DownloadList list.Model // New list for downloads
+	Namespace     string
+	Connected     bool
+	BuildInfo     string
+	User          *tg.User
+	Downloads     map[string]*DownloadItem
+	DownloadList  list.Model // New list for downloads
 	StatusMessage string
-	
+
 	// Account Management
-	Accounts   []string
-	kvStorage  kv.Storage
-	
+	Accounts  []string
+	kvStorage kv.Storage
+
 	// Internal
 	storage    storage.Storage
 	tuiProgram *tea.Program
-	
+
 	// Persistent Client
-	Client     *telegram.Client
-	ClientCtx  context.Context
+	Client       *telegram.Client
+	ClientCtx    context.Context
 	ClientCancel context.CancelFunc
-	clientMu   sync.Mutex
+	clientMu     sync.Mutex
 }
 
 type loginMsg struct {
@@ -144,17 +163,27 @@ func NewModel(root kv.Storage, s storage.Storage, ns string) *Model {
 	dim := viper.GetString("theme.dim")
 
 	// Fallback defaults if empty
-	if p == "" { p = "62" }
-	if sec == "" { sec = "230" }
-	if errColor == "" { errColor = "196" }
-	if suc == "" { suc = "42" }
-	if dim == "" { dim = "240" }
+	if p == "" {
+		p = "62"
+	}
+	if sec == "" {
+		sec = "230"
+	}
+	if errColor == "" {
+		errColor = "196"
+	}
+	if suc == "" {
+		suc = "42"
+	}
+	if dim == "" {
+		dim = "240"
+	}
 
 	InitStyles(p, sec, errColor, suc, dim)
 
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	
+
 	ti := textinput.New()
 	ti.Placeholder = "Enter Telegram Link..."
 	ti.CharLimit = 156
@@ -164,7 +193,7 @@ func NewModel(root kv.Storage, s storage.Storage, ns string) *Model {
 	dList := list.New([]list.Item{}, ItemDelegate{}, 0, 0)
 	dList.Title = "Chats"
 	dList.SetShowHelp(false)
-	
+
 	mList := list.New([]list.Item{}, ItemDelegate{}, 0, 0)
 	mList.Title = "Messages"
 	mList.SetShowHelp(false)
@@ -185,22 +214,37 @@ func NewModel(root kv.Storage, s storage.Storage, ns string) *Model {
 	dlList.Title = "Downloads"
 	dlList.SetShowHelp(false)
 
+	// Download Form Inputs
+	dirInput := textinput.New()
+	dirInput.Placeholder = "downloads"
+	dirInput.CharLimit = 100
+	dirInput.Width = 40
+
+	tmplInput := textinput.New()
+	tmplInput.Placeholder = "{{ .Index }}-{{ .ID }}"
+	tmplInput.CharLimit = 100
+	tmplInput.Width = 40
+
 	return &Model{
-		state:     stateDashboard,
-		ActiveTab: 0, // Dashboard default
-		Dialogs:   dList,
-		Messages:  mList,
-		Pane:      0, // Start with Dialogs focused
-		spinner:   sp,
-		Namespace: ns,
-		BuildInfo: consts.Version,
-		storage:   s,
-		kvStorage: root,
-		Downloads: make(map[string]*DownloadItem),
+		state:        stateDashboard,
+		ActiveTab:    0, // Dashboard default
+		Dialogs:      dList,
+		Messages:     mList,
+		Pane:         0, // Start with Dialogs focused
+		spinner:      sp,
+		Namespace:    ns,
+		BuildInfo:    consts.Version,
+		storage:      s,
+		kvStorage:    root,
+		Downloads:    make(map[string]*DownloadItem),
 		DownloadList: dlList,
-		input:     ti,
-		ExportInput: ei,
-		FilePicker: fp,
+		input:        ti,
+		ExportInput:  ei,
+		FilePicker:   fp,
+		DLForm: DownloadForm{
+			Dir:      dirInput,
+			Template: tmplInput,
+		},
 	}
 }
 
@@ -211,7 +255,7 @@ func (m *Model) SetProgram(p *tea.Program) {
 func (m *Model) Init() tea.Cmd {
 	// Initialize Status
 	m.StatusMessage = "Connecting to Telegram..."
-	
+
 	return tea.Batch(
 		m.spinner.Tick,
 		m.startClient, // Start the persistent connection
@@ -231,39 +275,39 @@ func (m *Model) startClient() tea.Msg {
 
 	// Create context for the client lifecycle
 	m.ClientCtx, m.ClientCancel = context.WithCancel(context.Background())
-	
+
 	logToFile("StartClient: Context created")
-	
-	// Create the client instance 
+
+	// Create the client instance
 	opts := tclient.Options{
 		KV:               m.storage,
 		Proxy:            viper.GetString(consts.FlagProxy),
 		NTP:              viper.GetString(consts.FlagNTP),
 		ReconnectTimeout: viper.GetDuration(consts.FlagReconnectTimeout),
 	}
-	
+
 	logToFile(fmt.Sprintf("StartClient: Options - Proxy: %v, NTP: %v", opts.Proxy != "", opts.NTP))
-	
+
 	var err error
 	m.Client, err = tclient.New(m.ClientCtx, opts, false)
 	if err != nil {
 		return loginMsg{Err: err}
 	}
-	
+
 	// Run the client in a goroutine
 	// We use a channel to signal when the client is ready/authorized effectively?
 	// Actually client.Run blocks. We need to run it and then perform a self check.
-	// But checkLogin expects a return based on 'User'. 
-	
+	// But checkLogin expects a return based on 'User'.
+
 	// Strategy:
 	// 1. Start client.Run in goroutine.
 	// 2. Wait for it to be ready (Auth Status).
 	// 3. Fetch Self.
 	// 4. Return loginMsg.
-	
+
 	readyCh := make(chan struct{})
 	errCh := make(chan error)
-	
+
 	go func() {
 		logToFile("ClientGoroutine: Starting Run")
 		err := m.Client.Run(m.ClientCtx, func(ctx context.Context) error {
@@ -282,7 +326,7 @@ func (m *Model) startClient() tea.Msg {
 			logToFile("ClientGoroutine: Stopped Gracefully")
 		}
 	}()
-	
+
 	// Wait for ready or error
 	logToFile("StartClient: Waiting for Ready signal...")
 	select {
@@ -292,23 +336,23 @@ func (m *Model) startClient() tea.Msg {
 		// We need to use m.ClientCtx or a sub-context
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		
+
 		status, err := m.Client.Auth().Status(ctx)
 		if err != nil {
 			return loginMsg{Err: err}
 		}
-		
+
 		if !status.Authorized {
 			return loginMsg{Err: fmt.Errorf("not authorized")}
 		}
-		
+
 		// Fetch Self
 		self, err := m.Client.Self(ctx)
 		if err != nil {
 			return loginMsg{Err: err}
 		}
 		return loginMsg{User: self}
-		
+
 	case err := <-errCh:
 		return loginMsg{Err: err}
 	case <-time.After(15 * time.Second):
