@@ -13,6 +13,7 @@ require (
 	github.com/fatih/color v1.18.0
 	github.com/flytam/filenamify v1.2.0
 	github.com/gabriel-vasile/mimetype v1.4.12
+	github.com/gen2brain/beeep v0.11.2
 	github.com/go-faster/errors v0.7.1
 	github.com/go-faster/jx v1.2.0
 	github.com/go-playground/validator/v10 v10.27.0
@@ -62,9 +63,9 @@ require (
 	github.com/cpuguy83/go-md2man/v2 v2.0.6 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
+	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/esiqveland/notify v0.13.3 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
-	github.com/gen2brain/beeep v0.11.2 // indirect
 	github.com/ghodss/yaml v1.0.0 // indirect
 	github.com/go-faster/xor v1.0.0 // indirect
 	github.com/go-faster/yaml v0.4.6 // indirect

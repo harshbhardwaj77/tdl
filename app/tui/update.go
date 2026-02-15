@@ -5,10 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/bubbles/progress"
+
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -21,18 +22,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.state == stateBatch {
 		var cmd tea.Cmd
 		m.FilePicker, cmd = m.FilePicker.Update(msg)
-		
+
 		if didSelect, path := m.FilePicker.DidSelectFile(msg); didSelect {
 			m.BatchPath = path
 			m.state = stateBatchConfirm
 			return m, nil
 		}
-		
+
 		// Handle Esc to exit
 		if msg, ok := msg.(tea.KeyMsg); ok && msg.String() == "esc" {
 			m.state = stateDashboard
 		}
-		
+
 		return m, cmd
 	}
 
@@ -65,7 +66,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	
+
 	// Export Prompt Intercept
 	if m.state == stateExportPrompt {
 		switch msg := msg.(type) {
@@ -80,13 +81,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(filename) < 5 || filename[len(filename)-5:] != ".json" {
 					filename += ".json"
 				}
-				
+
 				m.state = stateDashboard
 				m.ActiveTab = 1 // Return to browser
 				m.LoadingExport = true
 				m.StatusMessage = "Exporting to " + filename + "..."
 				return m, tea.Batch(m.startExport(m.ExportTarget, filename), m.spinner.Tick)
-				
+
 			case "esc":
 				m.state = stateDashboard
 				m.ActiveTab = 1
@@ -120,19 +121,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Use Base name for display if it looks like a path
 			if filepath.IsAbs(msg.Name) || len(filepath.Dir(msg.Name)) > 1 {
-				// We keep Name as full path for map key? 
+				// We keep Name as full path for map key?
 				// Actually typically msg.Name from TUIProgress is what we get.
 				// Let's rely on Title() doing Base() if we want, or here.
 				// For now simple.
 			}
-			
+
 			m.Downloads[msg.Name] = item
 			m.DownloadList.InsertItem(0, item)
 		}
-	
+
 	case dialogsMsg:
 		m.LoadingDialogs = false
-		
+
 		// Update Offsets
 		m.NextOffsetPeer = msg.NextPeer
 		m.NextOffsetDate = msg.NextDate
@@ -145,7 +146,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			for i, d := range msg.Dialogs {
 				items[i] = d
 			}
-			
+
 			if m.IsPaginating {
 				// Append
 				// Create new slice with old + new
@@ -159,7 +160,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Dialogs.SetItems(items)
 			}
 		}
-	
+
 	case historyMsg:
 		m.LoadingHistory = false
 		if msg.Err != nil {
@@ -184,17 +185,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.StatusMessage = fmt.Sprintf("Exported to %s", msg.Path)
 		}
 
-		
 		if msg.Err != nil {
 			// handle global or item specific error
 		}
-		
+
 		// Fallthrough only if we have logic for item updates here
 		// But in this case we seem to have mixed logic from ProgressMsg.
 		// The original ProgressMsg block handles 'item'.
-		
+
 		return m, nil
-		
+
 		// Update progress bar model
 		// Calculate percentage
 		// Update progress bar model
@@ -207,16 +207,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// But here we just set percentage for view
 		// Actually bubbles/progress needs an update msg for animation, but we can just View() it with strict percentage if we want
 		// or use SetPercent
-		
+
 		// For now simple reliable approach:
 		// We are not using the bubble's internal ticking for smooth animation to keep it simple first
-		
+
 		return m, nil
 	case AccountsMsg:
 		if msg.Err == nil {
 			m.Accounts = msg.Accounts
 		}
-		
+
 	case AccountSwitchedMsg:
 		if msg.Err != nil {
 			m.StatusMessage = fmt.Sprintf("Switch Failed: %v", msg.Err)
@@ -224,13 +224,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Namespace = msg.Namespace
 			m.storage = msg.Storage
 			m.StatusMessage = fmt.Sprintf("Switched to %s", msg.Namespace)
-			
+
 			// Reset State
 			m.User = nil
 			m.Connected = false
 			m.Dialogs.SetItems(nil)
 			m.Messages.SetItems(nil)
-			
+
 			// Re-login
 			return m, m.startClient
 		}
@@ -256,15 +256,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.ActiveTab = last
 				// Restore State
 				switch last {
-				case 0: m.state = stateDashboard
-				case 1: m.state = stateDashboard // Browser shares state usually or we can verify
-				case 2: m.state = stateDownloads
+				case 0:
+					m.state = stateDashboard
+				case 1:
+					m.state = stateDashboard // Browser shares state usually or we can verify
+				case 2:
+					m.state = stateDownloads
 				}
 				return m, nil
 			}
 			// Fallthrough to global quit checking if history empty?
 			// Or just do nothing.
-			
+
 		}
 
 		// 2. Global Navigation (Safe Keys)
@@ -292,7 +295,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.IsPaginating = true
 				m.LoadingDialogs = true
 				return m, tea.Batch(
-					m.GetDialogs(m.NextOffsetPeer, m.NextOffsetDate, m.NextOffsetID), 
+					m.GetDialogs(m.NextOffsetPeer, m.NextOffsetDate, m.NextOffsetID),
 					m.spinner.Tick,
 				)
 			}
@@ -316,7 +319,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.Accounts) > 1 {
 				idx := -1
 				for i, acc := range m.Accounts {
-					if acc == m.Namespace { idx = i; break }
+					if acc == m.Namespace {
+						idx = i
+						break
+					}
 				}
 				nextIdx := (idx + 1) % len(m.Accounts)
 				return m, m.SwitchAccount(m.Accounts[nextIdx])
@@ -336,7 +342,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				val := m.input.Value()
 				m.input.Reset()
 				m.input.Blur()
-				
+
 				if m.Searching {
 					m.Searching = false
 					m.LoadingDialogs = true
@@ -369,12 +375,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if dlg, ok := m.Dialogs.SelectedItem().(DialogItem); ok {
 							dest := strconv.FormatInt(dlg.PeerID, 10) // Use ID as dest
 							sources := m.ForwardSource
-							
+
 							// Reset state
 							m.PickingDest = false
 							m.ForwardSource = nil
 							m.StatusMessage = fmt.Sprintf("Forwarding to %s...", dlg.Title)
-							
+
 							return m, m.startForward(dest, sources)
 						}
 					}
@@ -401,7 +407,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			} else {
 				m.Messages, cmd = m.Messages.Update(msg)
-				
+
 				// Message Selection (Space)
 				if msg.String() == " " {
 					if idx := m.Messages.Index(); idx >= 0 {
@@ -425,7 +431,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							sources = append(sources, link)
 						}
 					}
-					
+
 					if len(sources) > 0 {
 						m.PickingDest = true
 						m.ForwardSource = sources
@@ -463,16 +469,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Header is ~2 lines, padding ~1 line. Tabs usually around line 3-5.
 			if msg.Y >= 2 && msg.Y <= 6 {
 				// Tabs are left aligned: Dashboard | Browser | Downloads
-				// Dashboard ~12 chars, Browser ~10 chars, Downloads ~12 chars
-				// Padding adds to it.
-				if msg.X >= 0 && msg.X < 15 {
+				// Dashboard (9+2=11), Browser (7+2=9), Downloads (9+2=11)
+				// Ranges: 0-11, 11-20, 20-31
+				if msg.X >= 0 && msg.X < 12 {
 					if m.ActiveTab != 0 {
 						m.TabHistory = append(m.TabHistory, m.ActiveTab)
 						m.ActiveTab = 0
 						m.state = stateDashboard
 					}
 					return m, nil
-				} else if msg.X >= 15 && msg.X < 30 {
+				} else if msg.X >= 12 && msg.X < 22 {
 					if m.ActiveTab != 1 {
 						m.TabHistory = append(m.TabHistory, m.ActiveTab)
 						m.ActiveTab = 1
@@ -483,7 +489,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 					return m, nil
-				} else if msg.X >= 30 && msg.X < 50 {
+				} else if msg.X >= 22 && msg.X < 40 {
 					if m.ActiveTab != 2 {
 						m.TabHistory = append(m.TabHistory, m.ActiveTab)
 						m.ActiveTab = 2
@@ -493,7 +499,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		
+
 		// Forward mouse to active components
 		var cmd tea.Cmd
 		if m.ActiveTab == 1 {
@@ -507,7 +513,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.ActiveTab == 2 {
 			var cmd tea.Cmd
 			m.DownloadList, cmd = m.DownloadList.Update(msg)
-			
+
 			if msg.String() == "o" {
 				if item, ok := m.DownloadList.SelectedItem().(*DownloadItem); ok {
 					if err := openFile(item.Path); err != nil {
@@ -526,22 +532,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.viewport.Width = msg.Width
 		m.viewport.Height = msg.Height
-		
+
 		// Calculate available space
 		// Borders: 2 (Left) + 2 (Right) = 4
 		// Margin: 1
 		// Total Overhead: 5
 		availableWidth := m.width - 5
-		if availableWidth < 0 { availableWidth = 0 }
-		
+		if availableWidth < 0 {
+			availableWidth = 0
+		}
+
 		leftWidth := availableWidth / 3
 		rightWidth := availableWidth - leftWidth
-		
+
 		// Height Overhead: Header (~3) + Tabs (~3) + Footer (~3) = ~9
 		// Using -10 to be safe
 		listHeight := m.height - 10
-		if listHeight < 0 { listHeight = 0 }
-		
+		if listHeight < 0 {
+			listHeight = 0
+		}
+
 		// Resize lists
 		m.Dialogs.SetSize(leftWidth, listHeight)
 		m.Messages.SetSize(rightWidth, listHeight)

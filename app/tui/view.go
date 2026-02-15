@@ -2,8 +2,8 @@ package tui
 
 import (
 	"fmt"
-	"strings"
 	"sort"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -21,10 +21,10 @@ func (m *Model) View() string {
 	if m.Connected {
 		status = lipgloss.NewStyle().Foreground(ColorSuccess).Render("Connected")
 	}
-	
+
 	s += lipgloss.JoinHorizontal(lipgloss.Center, header, "  ", status)
 	s += "\n\n"
-	
+
 	// Tabs
 	s += m.viewTabs()
 	s += "\n\n"
@@ -52,7 +52,7 @@ func (m *Model) View() string {
 			s += m.viewDashboard()
 		}
 	}
-	
+
 	if m.ShowHelp {
 		return m.viewHelpModal(s)
 	}
@@ -78,19 +78,20 @@ func (m *Model) viewHelpModal(bg string) string {
 		"  a         Switch Account",
 		"  L         Load More Chats",
 		"  l         Downloads Tab",
+		"  i         New Download (URL)",
 		"",
 		"  ?         Close Help",
 		"  q         Quit",
 	}
-	
+
 	content := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ColorPrimary).
 		Padding(1, 2).
 		Render(strings.Join(keys, "\n"))
-		
-	return lipgloss.Place(m.width, m.height, 
-		lipgloss.Center, lipgloss.Center, 
+
+	return lipgloss.Place(m.width, m.height,
+		lipgloss.Center, lipgloss.Center,
 		content,
 		lipgloss.WithWhitespaceChars(" "),
 		lipgloss.WithWhitespaceForeground(lipgloss.Color("237")),
@@ -99,29 +100,33 @@ func (m *Model) viewHelpModal(bg string) string {
 
 func (m *Model) viewBrowser() string {
 	var s string
-	
+
 	// Layout Calculations
 	availableWidth := m.width - 5
-	if availableWidth < 0 { availableWidth = 0 }
-	
+	if availableWidth < 0 {
+		availableWidth = 0
+	}
+
 	leftWidth := availableWidth / 3
 	rightWidth := availableWidth - leftWidth
-	
+
 	listHeight := m.height - 10
-	if listHeight < 0 { listHeight = 0 }
+	if listHeight < 0 {
+		listHeight = 0
+	}
 
 	// Left Pane (Dialogs)
 	leftStyle := InactivePaneStyle.Copy().
 		Width(leftWidth).
 		Height(listHeight)
-		
+
 	if m.PickingDest {
 		leftStyle = ActivePaneStyle.Copy().
 			Width(leftWidth).
 			Height(listHeight).
 			BorderForeground(lipgloss.Color("205")) // Pink for special mode
 	}
-	
+
 	// Left Content
 	var leftContent string
 	if m.LoadingDialogs {
@@ -130,7 +135,7 @@ func (m *Model) viewBrowser() string {
 		leftContent = m.Dialogs.View()
 	}
 	left := leftStyle.Render(leftContent)
-	
+
 	// Right Pane (Messages)
 	// ... (Right pane style logic same as before)
 	rightStyle := InactivePaneStyle.Copy().
@@ -144,7 +149,7 @@ func (m *Model) viewBrowser() string {
 			Height(listHeight).
 			MarginLeft(1)
 	}
-	
+
 	// Right Content
 	var rightContent string
 	if m.LoadingHistory {
@@ -155,18 +160,20 @@ func (m *Model) viewBrowser() string {
 		rightContent = "Select a chat to view messages"
 	}
 	right := rightStyle.Render(rightContent)
-	
+
 	s = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
-	
+
 	if m.PickingDest {
 		s += StatusBarStyle.Render("\n  [Enter] Confirm Destination (Forward) • [Esc] Cancel")
 	} else {
-		s += StatusBarStyle.Render("\n  [Tab] Pane • [Enter] Select • [Space] Mark • [e] Export • [L] Load More")
+		s += StatusBarStyle.Render("\n  [Tab] Pane • [Enter] Select • [Space] Mark • [e] Export • [?] Help")
 	}
-	
+
 	if m.StatusMessage != "" {
 		color := ColorSuccess
-		if m.LoadingExport { color = ColorPrimary }
+		if m.LoadingExport {
+			color = ColorPrimary
+		}
 		s += lipgloss.NewStyle().Foreground(color).Render("\n  " + m.StatusMessage)
 	} else if m.LoadingExport {
 		s += lipgloss.NewStyle().Foreground(ColorPrimary).Render("\n  ⏳ Exporting chat info... This may take a while.")
@@ -182,7 +189,7 @@ func (m *Model) viewBrowser() string {
 			s += lipgloss.NewStyle().Foreground(ColorPrimary).Render(fmt.Sprintf("\n  %d messages selected", count))
 		}
 	}
-	
+
 	if m.Searching || (m.ActiveTab == 1 && m.input.Focused()) {
 		s += "\n\n  " + m.input.View()
 	}
@@ -201,14 +208,14 @@ func (m *Model) viewDashboard() string {
    ██║   ██║  ██║██║
    ██║   ██████╔╝███████╗
    ╚═╝   ╚═════╝ ╚══════╝`
-	
+
 	s.WriteString(lipgloss.NewStyle().Foreground(ColorPrimary).Render(logo))
 	s.WriteString("\n\n")
 
 	if m.Connected {
 		s.WriteString(lipgloss.NewStyle().Foreground(ColorSuccess).Render("  You are connected to Telegram."))
 		if m.User != nil {
-			user := fmt.Sprintf("\n  User: %s %s (@%s)\n  ID: %d", 
+			user := fmt.Sprintf("\n  User: %s %s (@%s)\n  ID: %d",
 				m.User.FirstName, m.User.LastName, m.User.Username, m.User.ID)
 			s.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Render(user))
 		}
@@ -216,7 +223,7 @@ func (m *Model) viewDashboard() string {
 		s.WriteString(lipgloss.NewStyle().Foreground(ColorError).Render("  Not connected."))
 		s.WriteString("\n  Please login via 'tdl login' first or check your configuration.\n")
 	}
-	
+
 	// Accounts Section
 	if len(m.Accounts) > 1 {
 		s.WriteString("\n\n" + TitleStyle.Render("Accounts [a]:"))
@@ -230,54 +237,55 @@ func (m *Model) viewDashboard() string {
 			s.WriteString("\n" + style.Render(fmt.Sprintf("%s%s", prefix, acc)))
 		}
 	}
-	
+
 	s.WriteString("\n\n  [d] Dashboard  [b] Browser  [l] Downloads  [c] Config  [j] Batch  [i] New Download  [q] Quit")
-	
+
 	if m.input.Focused() {
 		s.WriteString("\n\n")
 		s.WriteString(m.input.View())
 	}
-	
+
 	// Footer
 	s.WriteString("\n\n")
 	if m.StatusMessage != "" {
 		s.WriteString(lipgloss.NewStyle().Foreground(ColorPrimary).Render("  " + m.StatusMessage + "\n"))
 	}
-	s.WriteString(StatusBarStyle.Render(fmt.Sprintf("tdl %s • %s", m.BuildInfo, m.Namespace)))
-	
+	s.WriteString(StatusBarStyle.Render(fmt.Sprintf("tdl %s • %s • [?] Help", m.BuildInfo, m.Namespace)))
+
 	return s.String()
 }
 
 func (m *Model) viewDownloads() string {
 	var s strings.Builder
 	s.WriteString("Active Downloads:\n\n")
-	
+
 	if len(m.Downloads) == 0 {
-		s.WriteString("  No active downloads.\n")
+		s.WriteString("  No active downloads.\n\n")
+		s.WriteString(lipgloss.NewStyle().Foreground(ColorDim).Render("  Press 'i' to start a new download from a URL."))
 		return s.String()
 	}
-	
+
 	// Sort by name for stability
 	keys := make([]string, 0, len(m.Downloads))
 	for k := range m.Downloads {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	
+
 	for _, k := range keys {
 		item := m.Downloads[k]
-		
+
 		// Bar
 		var pct float64
 		if item.Total > 0 {
 			pct = float64(item.Downloaded) / float64(item.Total)
 		}
-		
+
 		// Update bar view manually without message loop for now
 		// In a real app we'd trigger updates
-		
+
 		bar := item.Progress.ViewAs(pct)
-		
+
 		status := fmt.Sprintf("%s  %s", item.Name, bar)
 		if item.Finished {
 			if item.Err != nil {
@@ -286,10 +294,10 @@ func (m *Model) viewDownloads() string {
 				status += lipgloss.NewStyle().Foreground(ColorSuccess).Render(" Done")
 			}
 		}
-		
+
 		s.WriteString("  " + status + "\n")
 	}
-	
+
 	return s.String()
 }
 
@@ -325,7 +333,7 @@ func (m *Model) viewTabs() string {
 	var tabs []string
 	// Definition of tabs: 0=Dashboard, 1=Browser, 2=Downloads
 	labels := []string{"Dashboard", "Browser", "Downloads"}
-	
+
 	for i, label := range labels {
 		style := InactiveTabStyle
 		if m.ActiveTab == i {
